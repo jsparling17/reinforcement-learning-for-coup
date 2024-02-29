@@ -1,8 +1,10 @@
 
 
 class Player:
-    def __init__(self, cards=[0,0], coins=2, name="Bot", is_bot=True, agent=None):
+    def __init__(self, index=0, cards=[0,0], coins=2, name="Bot", is_bot=True, agent=None):
+        self.index = index
         self.cards = cards
+        self.discarded_cards = []
         self.coins = coins
         self.name = name
         self.is_bot = is_bot
