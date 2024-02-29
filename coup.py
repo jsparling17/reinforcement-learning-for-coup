@@ -1,13 +1,7 @@
 import random
 from player import Player
-
-class State:
-    """Represents the public state of the game."""
-    def __init__(self, players: list[Player], active_player: int):
-        self.revealed_cards: list[list[int]] = [player.discarded_cards for player in players]
-        self.coins: list[int] = [player.coins for player in players]
-        self.card_counts: list[int] = [len(player.cards) for player in players]
-        self.active_player: int = active_player
+from representations import State, Action
+            
 
 class Coup:
     """Simulates the game of Coup."""
@@ -76,9 +70,14 @@ class Coup:
 
     def get_state(self) -> State:
         pass
+
+    def valid_actions(self) -> list[Action]:
+        pass
     
     def play(self):
         player_idx = random.randint(0, self.player_count - 1)
 
         while self.remaining_players > 1:
             self.active_player = self.players[player_idx]
+
+            action = self.active_player.get_action(self.get_state)
