@@ -1,6 +1,6 @@
 import random
 from player import Player
-from representations import State, Action
+from representations import Action, Challenge, State
             
 
 class Coup:
@@ -57,15 +57,11 @@ class Coup:
         del self.deck[index]
         return card
     
-    def do_action(self, action: int) -> None:
-        """Performs the action specified by the input value given the current active and targeted players."""
+    def do_action(self, action: Action) -> None:
+        """Performs the action or counteraction specified by the input value."""
         pass
 
-    def do_counteraction(self, counteraction: int) -> None:
-        """Performs the counteraction specified by the input value given the current active and targeted players."""
-        pass
-
-    def do_challenge(self) -> None:
+    def do_challenge(self, challenge: Challenge) -> None:
         pass
 
     def get_state(self) -> State:
@@ -79,5 +75,9 @@ class Coup:
 
         while self.remaining_players > 1:
             self.active_player = self.players[player_idx]
+            while len(self.active_player.cards) == 0:
+                player_idx = (player_idx + 1) % self.player_count
+                self.active_player = self.players[player_idx]
 
-            action = self.active_player.get_action(self.get_state)
+            action = self.active_player.get_action(self.get_state(), self.valid_actions())
+            
