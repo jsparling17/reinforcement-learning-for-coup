@@ -1,23 +1,22 @@
+from representations import Action, Challenge, State
 
 
 class Player:
-    def __init__(self, index=0, cards=[0,0], coins=2, name="Bot", is_bot=True, agent=None):
-        self.index = index
-        self.cards = cards
-        self.discarded_cards = []
-        self.coins = coins
-        self.name = name
-        self.is_bot = is_bot
+    def __init__(self, index: int = 0, cards: list[int] = [0, 0], coins: int = 2, name: str = 'Bot', is_bot: bool = True, agent = None):
+        self.index: int = index
+        self.cards: list[int] = cards
+        self.discarded_cards: list[int] = []
+        self.coins: int = coins
+        self.name: str = name
+        self.is_bot: bool = is_bot
         self.agent = agent
 
-    def get_action(self, state, valid_actions):
-        state = [self.name] + state
-        #print("Valid actions: " + str(valid_actions))
-        action, _ = self.agent.act(state, valid_actions)
+    def get_action(self, state: State, valid_actions: list[Action]):
+        #TODO if agent, use agent to select action
 
         #TODO Is not bot action
         
-        return action
+        pass
 
     def get_challenge(self, state, active_player, action, target_player):
         state = [self.name] + state
