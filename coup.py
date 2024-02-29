@@ -5,7 +5,7 @@ from representations import Action, Challenge, State
 
 class Coup:
     """Simulates the game of Coup."""
-    def __init__(self, player_count: int, provided_players: list[Player]) -> None:
+    def __init__(self, player_count: int, provided_players: list[Player], round_cap: int = 100, print_public: bool = True, print_private: bool = False) -> None:
         if player_count < 2 or player_count > 6:
             raise Exception('ERROR! The player count must be between 2 and 6.')
 
@@ -23,6 +23,9 @@ class Coup:
         self.target_player: Player = None
         self.player_count: int = player_count
         self.remaining_players: int = player_count
+        self.round_cap: int = round_cap
+        self.print_public: bool = print_public
+        self.print_private: bool = print_private
 
         # maps action number representation to name of action; i.e. self.action_names[i] gives the name of the action represented by i
         self.action_names: list[str] = ['Income', 'Foreign Aid', 'Coup', 'Exchange', 'Assassinate', 'Steal', 'Tax']
@@ -56,28 +59,56 @@ class Coup:
         card = self.deck[index]
         del self.deck[index]
         return card
-    
-    def do_action(self, action: Action) -> None:
-        """Performs the action or counteraction specified by the input value."""
-        pass
-
-    def do_challenge(self, challenge: Challenge) -> None:
-        pass
 
     def get_state(self) -> State:
+        """Returns the current public state of the game."""
         pass
 
     def valid_actions(self) -> list[Action]:
+        """Returns a list of the valid actions or counteractions currently available to the active player."""
+        pass
+
+    def get_challenge(self, action: Action | None) -> Challenge | None:
+        """If any players wish to challenge the given action, returns the challenge from the first player in turn order."""
+        pass
+
+    def get_counter(self, action: Action) -> Action | None:
+        """If any players wish to take a counteraction to the give action, returns the counteraction."""
         pass
     
-    def play(self):
+    # may update player cards, player coins, and remaining players
+    def do_action(self, action: Action) -> None:
+        """Performs the action or counteraction specified by the input."""
+        pass
+
+    # may update player cards and remaining players
+    def do_challenge(self, challenge: Challenge | None) -> bool:
+        """Performs the challenge specified by the input. Returns True if the challenge succeeds (and the action fails), and False otherwise. If the input is None, returns False."""
+        pass
+    
+    def play(self) -> Player | None:
+        """Simulates a game of Coup. Returns the winning player."""
         player_idx = random.randint(0, self.player_count - 1)
 
         while self.remaining_players > 1:
+            player_idx = (player_idx + 1) % self.player_count
             self.active_player = self.players[player_idx]
-            while len(self.active_player.cards) == 0:
-                player_idx = (player_idx + 1) % self.player_count
-                self.active_player = self.players[player_idx]
+            if len(self.active_player.cards) == 0:
+                continue
 
             action = self.active_player.get_action(self.get_state(), self.valid_actions())
             
+            challenge = self.get_challenge(action)
+
+            if not self.do_challenge(challenge):
+                counter = self.get_counter(action)
+                challenge = self.get_challenge(counter)
+                if self.do_challenge(challenge) or counter is None:
+                    self.do_action()
+
+            self.round += 1
+
+            if self.round >= self.round_cap:
+                return None
+            
+        return max(self.players, key=lambda x : len(x.cards))
