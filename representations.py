@@ -1,9 +1,12 @@
+from abc import ABC, abstractmethod
+
 from player import Player
 
 
-class Representation:
+class Representation(ABC):
     """Interface for representations of an aspect of the game."""
 
+    @abstractmethod
     def __str__(self) -> str:
         pass
 
@@ -16,6 +19,12 @@ class Action(Representation):
         self.active_player: int = active_player
         self.target_player: int = target_player
         self.is_counter: bool = is_counter
+
+    def __eq__(self, other: 'Action') -> bool:
+        return self.type == other.type and\
+               self.active_player == other.active_player and\
+               self.target_player == other.target_player and\
+               self.is_counter == other.is_counter
 
     def action_str(self) -> str:
         match self.type:
@@ -32,12 +41,12 @@ class Action(Representation):
                 rep = 'Exchange cards with the deck.\n'
             case 4:
                 if self.is_counter:
-                    rep = f'block player {self.target_player} from Assassinating them.\n'
+                    rep = f'block player {self.target_player} from Assassinating.\n'
                 else:
                     rep = f'Assassinate player {self.target_player}.\n'
             case 5:
                 if self.is_counter:
-                    rep = f'block player {self.target_player} from Stealing from them.\n'
+                    rep = f'block player {self.target_player} from Stealing.\n'
                 else:
                     rep = f'Steal from player {self.target_player}.\n'
             case 6:
@@ -115,3 +124,15 @@ class PrivateState(State):
                     raise Exception('ERROR! A player has discarded more than 2 cards.')
                 
         return rep
+    
+class ExchangeCards(Representation):
+    """Represents the cards draw with the Exchange action."""
+
+    # maps card number representation to name of card; i.e. self.card_names[i] gives the name of the card represented by i
+    card_names: list[str] = ['Ambassador', 'Assassin', 'Captain', 'Contessa', 'Duke']
+
+    def __init__(self, cards: list[int]) -> None:
+        self.cards: list[int] = cards
+
+    def __str__(self) -> str:
+        return f'the {' and '.join([self.card_names[self.cards[i]] for i in range(2)])}'

@@ -1,60 +1,105 @@
-from representations import Action, Challenge, State
+import random
+from abc import ABC, abstractmethod
+
+from representations import Action, Challenge, State, ExchangeCards
 
 
-class Player:
-    def __init__(self, index: int = 0, cards: list[int] = [0, 0], coins: int = 2, name: str = 'Bot', is_bot: bool = True, agent = None):
+class Player(ABC):
+    """Interface for players."""
+
+    def __init__(self, index: int = 0, cards: list[int] = [0, 0], coins: int = 2, name: str = 'Bot', is_bot: bool = True) -> None:
         self.index: int = index
         self.cards: list[int] = cards
         self.discarded_cards: list[int] = []
         self.coins: int = coins
         self.name: str = name
         self.is_bot: bool = is_bot
-        self.agent = agent
 
-    def get_action(self, state: State, valid_actions: list[Action]):
-        #TODO if agent, use agent to select action
-
-        #TODO Is not bot action
-        
+    @abstractmethod
+    def get_action(self, state: State, valid_actions: list[Action]) -> Action:
+        pass
+    
+    @abstractmethod
+    def get_challenge(self, state: State, action: Action) -> Challenge | None:
         pass
 
-    def get_challenge(self, state, active_player, action, target_player):
-        state = [self.name] + state
-        if target_player != -1 and not(target_player is None):
-            valid_actions = [[active_player.name, action, target_player.name, i] for i in range(2)]
-        else:
-            valid_actions = [[active_player.name, action, -1, i] for i in range(2)]
-        _, is_challenge = self.agent.act(state, valid_actions)
-        return is_challenge
+    @abstractmethod
+    def get_counteraction(self, state: State, valid_actions: list[Action]) -> Action | None:
+        pass
 
-    def lose_card(self):
-        # TODO Decides what card to lose and loses it
-        card_pos = 0
-        card = self.cards[card_pos]
-        del self.cards[card_pos]
-        return card
+    @abstractmethod
+    def lose_card(self) -> int:
+        pass
 
-    def fake_lose_card(self, state, card):
-        state = [self.name] + state
-        valid_actions = [[-1, card, -1, i] for i in range(2)]
-        _, is_challenge = self.agent.act(state, valid_actions)
-        return is_challenge
+    @abstractmethod
+    def choose_cards(self, state: State) -> list[int]:
+        pass
 
-    def choose_cards(self, state):
-        # TODO 
-        index1, index2 = 0, 1
-
-        card1 = self.cards[index1]
-        card2 = self.cards[index2]
-
-        del self.cards[index1]
-        del self.cards[index2]
-
-        return [card1, card2]
-
-    def show_card(self, card):
-        if self.cards[0] == card:
-            del self.cards[0]
-        else:
-            del self.cards[1]
+    @abstractmethod
+    def show_card(self, card: int) -> None:
+        pass
         
+class GreedyPlayer(Player):
+    """A player that always assassinates a random opponent with among the least cards when possible,\
+        taxes otherwise, uses counteractions when it has the appropriate cards, and never challenges."""
+
+    def get_action(self, state: State, valid_actions: list[Action]) -> Action:
+        assassinations = [action for action in valid_actions if action.type == 4]
+        if len(assassinations) > 0:
+            return random.choice(assassinations)
+        
+        tax = Action(6, state.active_player)
+        if tax in valid_actions:
+            return tax
+        
+        return random.choice(valid_actions)
+    
+    def get_challenge(self, state: State, action: Action) -> Challenge | None:
+        return None
+    
+    def get_counteraction(self, state: State, valid_actions: list[Action]) -> Action | None:
+        for action in valid_actions:
+            if action.type == 1 and 4 in self.cards:
+                # block foreign aid
+                return Action
+            if action.type == 4 and 3 in self.cards:
+                # block assassination
+                return Action
+            if action.type == 5 and 0 in self.cards or 2 in self.cards:
+                # block foreign aid
+                return Action
+            return None
+
+    def lose_card(self) -> int:
+        assassins_idx = [i for i in range(len(self.cards)) if self.cards[i] == 1]
+        dukes_idx = [i for i in range(len(self.cards)) if self.cards[i] == 4]
+
+        useful_idx = assassins_idx + dukes_idx
+
+        lose_idx = -1
+        for i in range(len(self.cards)):
+            if i not in useful_idx:
+                lose_idx = i
+                break
+        
+        if lose_idx < 0:
+            for i in range(len(self.cards)):
+                if i not in assassins_idx:
+                    lose_idx = i
+                    break
+        
+        lose_idx = 0
+        
+        card = self.cards[lose_idx]
+        del self.cards[lose_idx]
+        self.discarded_cards.append(card)
+        return card
+            
+
+    def choose_cards(self, state: State) -> list[int]:
+        cards = [self.lose_card() for i in range(2)]
+        return cards
+
+    def show_card(self, card: int) -> None:
+        idx = self.cards.index(card)
+        del self.cards[idx]
