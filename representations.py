@@ -160,24 +160,30 @@ class Player(ABC):
 
     @abstractmethod
     def get_action(self, state: State, valid_actions: list[Action]) -> Action:
+        """Selects a valid action given a game state."""
         pass
     
     @abstractmethod
     def get_challenge(self, state: State, action: Action) -> Challenge | None:
+        """Decides whether to challenge a given action given a game state."""
         pass
 
     @abstractmethod
     def get_counteraction(self, state: State, valid_actions: list[Action]) -> Action | None:
+        """Decides whether to take a counteraction given a game state."""
         pass
 
     @abstractmethod
     def lose_card(self, state: State) -> int:
+        """Decides which card to discard given a game state."""
         pass
 
     @abstractmethod
     def choose_cards(self, state: State) -> list[int]:
+        """Decides which cards to return to the deck for the Exchange action."""
         pass
 
     @abstractmethod
     def show_card(self, card: int) -> None:
+        """Removes a given card from the player's hand as the result of a unsuccessful challenge."""
         pass
