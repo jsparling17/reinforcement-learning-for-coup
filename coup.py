@@ -37,7 +37,7 @@ class Coup:
         self.action_mapping: list[int] = [-1, -1, -1, 0, 1, 2, 4]
 
         for i in range(player_count - len(provided_players)):
-            player = GreedyPlayer(name=i, is_bot=True)
+            player = GreedyPlayer(name=i)
             self.players.append(player)
 
         self.players += provided_players
@@ -73,7 +73,7 @@ class Coup:
     def get_private_state(self) -> PrivateState:
         """Returns the current complete state of the game."""
 
-        return PrivateState(self.players, self.active_player)
+        return PrivateState(self.players, self.active_player.index)
 
     def valid_actions(self) -> list[Action]:
         """Returns a list of the valid actions currently available to the active player."""
@@ -82,7 +82,7 @@ class Coup:
         player_idx = self.active_player.index
         if coins >= 10:
             # must stage coup if 10+ coins
-            return [Action(2, player_idx, i) for i in range(self.player_count) if i != player_idx]
+            return [Action(2, player_idx, i) for i in range(self.player_count) if i != player_idx and len(self.players[i].cards) != 0]
         
         actions = []
 
@@ -94,17 +94,17 @@ class Coup:
 
         if coins >= 7:
             # could stage a coup against each other player
-            return [Action(2, player_idx, i) for i in range(self.player_count) if i != player_idx]
+            return [Action(2, player_idx, i) for i in range(self.player_count) if i != player_idx and len(self.players[i].cards) != 0]
         
         # could exchange
         actions += [Action(3, player_idx)]
 
         if coins >= 3:
             # could assassinate each other player
-            actions += [Action(4, player_idx, i) for i in range(self.player_count) if i != player_idx]
+            actions += [Action(4, player_idx, i) for i in range(self.player_count) if i != player_idx and len(self.players[i].cards) != 0]
         
         # could steal from each other player with coins
-        actions += [Action(5, player_idx, i) for i in range(self.player_count) if i != player_idx and self.players[i].coins > 0]
+        actions += [Action(5, player_idx, i) for i in range(self.player_count) if i != player_idx and self.players[i].coins > 0 and len(self.players[i].cards) != 0]
 
         # could tax
         actions += [Action(6, player_idx)]
@@ -113,6 +113,9 @@ class Coup:
 
     def valid_counteractions(self, action: Action, player_idx: int) -> list[Action]:
         """Returns a list of the valid counteractions currently available to the given player."""
+
+        if action.target_player != player_idx:
+            return []
 
         target_player_idx = self.active_player.index
         if action.type in {1, 4, 5}:
@@ -170,7 +173,7 @@ class Coup:
         elif action_type == 2:
             # coup
             active_player.coins -= 7
-            target_player.lose_card()
+            target_player.lose_card(self.get_state())
             if len(target_player.cards) == 0:
                 self.remaining_players -= 1
 
@@ -185,13 +188,13 @@ class Coup:
         elif action_type == 4:
             # assassinate
             active_player.coins -= 3
-            target_player.lose_card()
+            target_player.lose_card(self.get_state())
             if len(target_player.cards) == 0:
                 self.remaining_players -= 1
 
         elif action_type == 5:
             # steal
-            coins = max(2, target_player.coins)
+            coins = min(2, target_player.coins)
             active_player.coins += coins
             target_player.coins -= coins
 
@@ -223,7 +226,7 @@ class Coup:
             target_player.show_card(card)
             self.deck.append(card)
             target_player.cards.append(self.draw_card())
-            active_player.lose_card()
+            active_player.lose_card(self.get_state())
             if len(active_player.cards) == 0:
                 self.remaining_players -= 1
 
@@ -234,7 +237,7 @@ class Coup:
 
             return False
         else:
-            target_player.lose_card()
+            target_player.lose_card(self.get_state())
             if len(target_player.cards) == 0:
                 self.remaining_players -= 1
 
@@ -268,6 +271,7 @@ class Coup:
             self.print_history()
         if is_tie:
             print(f'The game ends in a tie at round {self.round}.')
+            print(f'{self.get_private_state()}')
             return None
         return max(self.players, key=lambda x : len(x.cards))
     

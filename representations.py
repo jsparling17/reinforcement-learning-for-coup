@@ -73,7 +73,12 @@ class Challenge(Representation):
 
 
 class State(Representation):
-    """Represents the public state of the game."""
+    """Represents the public state of the game.\n
+       Fields:\n
+       self.revealed_cards\n
+       self.coins\n
+       self.card_counts\n
+       self.active_player"""
     
     # maps card number representation to name of card; i.e. self.card_names[i] gives the name of the card represented by i
     card_names: list[str] = ['Ambassador', 'Assassin', 'Captain', 'Contessa', 'Duke']
@@ -166,7 +171,7 @@ class Player(ABC):
         pass
 
     @abstractmethod
-    def lose_card(self) -> int:
+    def lose_card(self, state: State) -> int:
         pass
 
     @abstractmethod
