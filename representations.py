@@ -135,4 +135,4 @@ class ExchangeCards(Representation):
         self.cards: list[int] = cards
 
     def __str__(self) -> str:
-        return f'the {' and '.join([self.card_names[self.cards[i]] for i in range(2)])}'
+        return f'A player returned the {' and '.join([self.card_names[self.cards[i]] for i in range(2)])} to the deck.\n'

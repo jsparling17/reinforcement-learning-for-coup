@@ -242,7 +242,8 @@ class Coup:
     def print_history(self) -> None:
         """Prints the complete transcript of a game."""
 
-        pass
+        for round in self.history:
+            print(f'Round {round}:\n', "".join(self.history[round]))
     
     def play(self) -> Player | None:
         """Simulates a game of Coup. Returns the winning player."""
