@@ -1,13 +1,13 @@
 import random
 
-from player import Player
-from representations import Representation, Action, Challenge, State, PrivateState, ExchangeCards
+from player import GreedyPlayer
+from representations import Representation, Action, Challenge, State, PrivateState, ExchangeCards, Player
             
 
 class Coup:
     """Simulates the game of Coup."""
 
-    def __init__(self, player_count: int, provided_players: list[Player], round_cap: int = 100, print_public: bool = True, print_private: bool = False) -> None:
+    def __init__(self, player_count: int, provided_players: list[Player] = [], round_cap: int = 100, print_public: bool = True, print_private: bool = False) -> None:
         if player_count < 2 or player_count > 6:
             raise Exception('ERROR! The player count must be between 2 and 6.')
 
@@ -37,7 +37,7 @@ class Coup:
         self.action_mapping: list[int] = [-1, -1, -1, 0, 1, 2, 4]
 
         for i in range(player_count - len(provided_players)):
-            player = Player(name=i, is_bot=True)
+            player = GreedyPlayer(name=i, is_bot=True)
             self.players.append(player)
 
         self.players += provided_players
@@ -68,7 +68,7 @@ class Coup:
     def get_state(self) -> State:
         """Returns the current public state of the game."""
 
-        return State(self.players, self.active_player)
+        return State(self.players, self.active_player.index)
 
     def get_private_state(self) -> PrivateState:
         """Returns the current complete state of the game."""
@@ -116,7 +116,7 @@ class Coup:
 
         target_player_idx = self.active_player.index
         if action.type in {1, 4, 5}:
-            return [Action(action.type, player_idx, target_player_idx, True)]
+            return [Action(action.type, player_idx, target_player_idx, is_counter=True)]
         return []
 
 
@@ -127,7 +127,7 @@ class Coup:
             player_idx = (i + self.active_player.index) % self.player_count
             player = self.players[player_idx]
             if len(player.cards) != 0:
-                challenge = player.get_challenge(self.get_state, Action)
+                challenge = player.get_challenge(self.get_state(), action)
                 if challenge is not None:
                     return challenge
                 
@@ -140,7 +140,7 @@ class Coup:
             player_idx = (i + self.active_player.index) % self.player_count
             player = self.players[player_idx]
             if len(player.cards) != 0:
-                counter = player.get_counteraction(self.get_state, self.valid_counteractions(action, player_idx))
+                counter = player.get_counteraction(self.get_state(), self.valid_counteractions(action, player_idx))
                 if counter is not None:
                     self.history[self.round].append(counter)
                     if self.print_public:
@@ -171,6 +171,8 @@ class Coup:
             # coup
             active_player.coins -= 7
             target_player.lose_card()
+            if len(target_player.cards) == 0:
+                self.remaining_players -= 1
 
         elif action_type == 3:
             # exchange
@@ -184,6 +186,8 @@ class Coup:
             # assassinate
             active_player.coins -= 3
             target_player.lose_card()
+            if len(target_player.cards) == 0:
+                self.remaining_players -= 1
 
         elif action_type == 5:
             # steal
@@ -194,6 +198,10 @@ class Coup:
         elif action_type == 6:
             # tax
             active_player.coins += 3
+
+    def do_cost(self, action: Action) -> None:
+        if action.type == 4:
+            self.active_player.coins -= 3
             
 
     # may update player cards and remaining players
@@ -216,15 +224,23 @@ class Coup:
             self.deck.append(card)
             target_player.cards.append(self.draw_card())
             active_player.lose_card()
+            if len(active_player.cards) == 0:
+                self.remaining_players -= 1
 
             if self.print_public:
-                print(challenge, 'The challenge is unsuccessful.\n', self.get_state())
+                print(challenge)
+                print('The challenge is unsuccessful.\n')
+                print(self.get_state())
 
             return False
         else:
             target_player.lose_card()
+            if len(target_player.cards) == 0:
+                self.remaining_players -= 1
 
-            print(challenge, 'The challenge is successful.\n', self.get_state())
+            print(challenge)
+            print('The challenge is successful.\n')
+            print(self.get_state())
 
             return True
 
@@ -236,14 +252,24 @@ class Coup:
         self.history[self.round].append(action)
 
         if self.print_public:
-            print(f'Round {self.round}:\n', state)
+            print(f'Round {self.round}:\n')
+            print(state)
             print(action)
 
     def print_history(self) -> None:
         """Prints the complete transcript of a game."""
 
         for round in self.history:
-            print(f'Round {round}:\n', "".join(self.history[round]))
+            print(f'Round {round}:\n')
+            print(''.join(self.history[round]))
+
+    def end_game(self, is_tie: bool = False) -> Player | None:
+        if self.print_private:
+            self.print_history()
+        if is_tie:
+            print(f'The game ends in a tie at round {self.round}.')
+            return None
+        return max(self.players, key=lambda x : len(x.cards))
     
     def play(self) -> Player | None:
         """Simulates a game of Coup. Returns the winning player."""
@@ -264,18 +290,20 @@ class Coup:
             challenge = self.get_challenge(action)
 
             if not self.do_challenge(challenge):
+                if self.remaining_players == 1:
+                    return self.end_game()
                 counter = self.get_counter(action)
                 challenge = self.get_challenge(counter)
                 if self.do_challenge(challenge) or counter is None:
-                    self.do_action()
+                    if self.remaining_players == 1:
+                        return self.end_game()
+                    self.do_action(action)
+                else:
+                    self.do_cost(action)
             
             self.round += 1
 
             if self.round >= self.round_cap:
-                if self.print_private:
-                    self.print_history()
-                return None
+                return self.end_game(is_tie=True)
         
-        if self.print_private:
-            self.print_history()
-        return max(self.players, key=lambda x : len(x.cards))
+        return self.end_game()
