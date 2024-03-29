@@ -63,7 +63,6 @@ class GreedyPlayer(Player):
         self.discarded_cards.append(card)
         return card
             
-
     def choose_cards(self, state: State) -> list[int]:
         cards = []
         for i in range(2):
@@ -75,6 +74,7 @@ class GreedyPlayer(Player):
     def show_card(self, card: int) -> None:
         idx = self.cards.index(card)
         del self.cards[idx]
+
 
 class PiratePlayer(Player):
     """A player that always assassinates an opponent when possible, steals from the richest opponent otherwise, uses counteractions when it has the appropriate cards, and never challenges."""
@@ -137,6 +137,110 @@ class PiratePlayer(Player):
         self.discarded_cards.append(card)
         return card
             
+    def choose_cards(self, state: State) -> list[int]:
+        cards = []
+        for i in range(2):
+            lose_idx = self.choose_card(state)
+            cards.append(self.cards[lose_idx])
+            del self.cards[lose_idx]
+        return cards
+
+    def show_card(self, card: int) -> None:
+        idx = self.cards.index(card)
+        del self.cards[idx]
+
+
+class SmartPlayer(Player):
+    """A player that follows a relatively effective heuristic."""
+
+    # TODO: add tracking for which cards opponent has (e.g. for relevant counteractions)
+
+    def get_action(self, state: State, valid_actions: list[Action]) -> Action:
+
+        coups = [action for action in valid_actions if action.type == 2]
+        if len(coups) > 0:
+            max_cards = max([state.card_counts[action.target_player] for action in coups])
+            return random.choice([action for action in coups if state.card_counts[action.target_player] == max_cards])
+        
+        if (1 in self.cards and random.random() < 0.8) or (1 not in self.cards and random.random() < 0.2):
+            assassinations = [action for action in valid_actions if action.type == 4]
+            if len(assassinations) > 0:
+                max_cards = max([state.card_counts[action.target_player] for action in assassinations])
+                return random.choice([action for action in assassinations if state.card_counts[action.target_player] == max_cards])
+            
+        tax = Action(6, state.active_player)
+        if tax in valid_actions and (4 in self.cards):
+            return tax
+            
+        thefts = [action for action in valid_actions if action.type == 5]
+        if len(thefts) > 0:
+            max_coins = max([state.coins[action.target_player] for action in thefts])
+            if max_coins > 0 and (2 in self.cards):
+                return random.choice([action for action in thefts if state.coins[action.target_player] == max_coins])
+            
+        rand = random.random()
+        if rand < 0.5:
+            income = Action(0, state.active_player)
+            if income in valid_actions:
+                return income
+            
+        elif rand < 0.75:
+            if tax in valid_actions:
+                return tax
+            
+        elif len(thefts) > 0 and max_coins > 0:
+            return random.choice([action for action in thefts if state.coins[action.target_player] == max_coins])
+        
+        return random.choice(valid_actions)
+    
+    def get_challenge(self, state: State, action: Action) -> Challenge | None:
+        # TODO: add tracking of discarded cards, number of times opponent has taken given action
+
+        if random.random() < 0.2:
+            return Challenge(action, self.index, state.active_player)
+        return None
+    
+    def get_counteraction(self, state: State, valid_actions: list[Action]) -> Action | None:
+        for action in valid_actions:
+            if action.type == 1 and 4 in self.cards:
+                # block foreign aid
+                return action
+            if action.type == 4 and 3 in self.cards:
+                # block assassination
+                return action
+            if action.type == 5 and 0 in self.cards or 2 in self.cards:
+                # block foreign aid
+                return action
+        if random.random() < 0.2:
+            return random.choice(valid_actions)
+        return None
+        
+    def choose_card(self, state: State) -> int:
+
+        if 0 in self.cards:
+            return self.cards.index(0)
+        
+        if 3 in self.cards:
+            return self.cards.index(3)
+        
+        if 4 in self.cards:
+            return self.cards.index(4)
+        
+        if 2 in self.cards:
+            return self.cards.index(2)
+        
+        if 1 in self.cards:
+            return self.cards.index(1)
+        
+        return 0
+    
+    def lose_card(self, state: State) -> int:
+        lose_idx = self.choose_card(state)
+        card = self.cards[lose_idx]
+        del self.cards[lose_idx]
+        self.discarded_cards.append(card)
+        return card
+            
 
     def choose_cards(self, state: State) -> list[int]:
         cards = []
@@ -149,6 +253,7 @@ class PiratePlayer(Player):
     def show_card(self, card: int) -> None:
         idx = self.cards.index(card)
         del self.cards[idx]
+
 
 class UserPlayer(Player):
     """A player controlled by the user."""
