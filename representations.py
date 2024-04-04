@@ -104,6 +104,12 @@ class State(Representation):
         
         return rep
     
+    def as_array(self) -> list[int]:
+        active = self.active_player
+        opp = (active + 1) % 2
+        revealed = [sum([p.count(i) for p in self.revealed_cards]) for i in range(5)]
+        return revealed + [self.coins[active], self.coins[opp]] + [self.card_counts[opp]]
+    
 
 class PrivateState(State):
     """Represents the complete state of the game."""
@@ -127,6 +133,14 @@ class PrivateState(State):
                     raise Exception('ERROR! A player has discarded more than 2 cards.')
                 
         return rep
+    
+    def as_array(self) -> list[int]:
+        active = self.active_player
+        opp = (active + 1) % 2
+        revealed = [sum([p.count(i) for p in self.revealed_cards]) for i in range(5)]
+        cards = self.hidden_cards[active]
+        cards = cards if len(cards) == 2 else cards + [-1]
+        return revealed + [self.coins[active], self.coins[opp]] + cards + [len(self.hidden_cards[opp])]
     
 class ExchangeCards(Representation):
     """Represents the cards draw with the Exchange action."""
