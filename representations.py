@@ -188,16 +188,30 @@ class Player(ABC):
         pass
 
     @abstractmethod
-    def lose_card(self, state: State) -> int:
+    def choose_card(self, state: State) -> int:
         """Decides which card to discard given a game state."""
         pass
 
-    @abstractmethod
+    def lose_card(self, state: State) -> int:
+        """Discards a card."""
+        lose_idx = self.choose_card(state)
+        card = self.cards[lose_idx]
+        del self.cards[lose_idx]
+        self.discarded_cards.append(card)
+        return card
+            
     def choose_cards(self, state: State) -> list[int]:
         """Decides which cards to return to the deck for the Exchange action."""
-        pass
 
-    @abstractmethod
+        cards = []
+        for i in range(2):
+            lose_idx = self.choose_card(state)
+            cards.append(self.cards[lose_idx])
+            del self.cards[lose_idx]
+        return cards
+
     def show_card(self, card: int) -> None:
         """Removes a given card from the player's hand as the result of a unsuccessful challenge."""
-        pass
+
+        idx = self.cards.index(card)
+        del self.cards[idx]

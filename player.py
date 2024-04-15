@@ -1,4 +1,5 @@
 import random
+import torch
 
 from representations import Action, Challenge, State, Player
 
@@ -56,25 +57,6 @@ class GreedyPlayer(Player):
 
         return lose_idx
 
-    def lose_card(self, state: State) -> int:
-        lose_idx = self.choose_card(state)
-        card = self.cards[lose_idx]
-        del self.cards[lose_idx]
-        self.discarded_cards.append(card)
-        return card
-            
-    def choose_cards(self, state: State) -> list[int]:
-        cards = []
-        for i in range(2):
-            lose_idx = self.choose_card(state)
-            cards.append(self.cards[lose_idx])
-            del self.cards[lose_idx]
-        return cards
-
-    def show_card(self, card: int) -> None:
-        idx = self.cards.index(card)
-        del self.cards[idx]
-
 
 class PiratePlayer(Player):
     """A player that always assassinates an opponent when possible, steals from the richest opponent otherwise, uses counteractions when it has the appropriate cards, and never challenges."""
@@ -130,27 +112,8 @@ class PiratePlayer(Player):
 
         return lose_idx
 
-    def lose_card(self, state: State) -> int:
-        lose_idx = self.choose_card(state)
-        card = self.cards[lose_idx]
-        del self.cards[lose_idx]
-        self.discarded_cards.append(card)
-        return card
-            
-    def choose_cards(self, state: State) -> list[int]:
-        cards = []
-        for i in range(2):
-            lose_idx = self.choose_card(state)
-            cards.append(self.cards[lose_idx])
-            del self.cards[lose_idx]
-        return cards
 
-    def show_card(self, card: int) -> None:
-        idx = self.cards.index(card)
-        del self.cards[idx]
-
-
-class SmartPlayer(Player):
+class HeuristicPlayer(Player):
     """A player that follows a relatively effective heuristic."""
 
     # TODO: add tracking for which cards opponent has (e.g. for relevant counteractions)
@@ -233,26 +196,41 @@ class SmartPlayer(Player):
             return self.cards.index(1)
         
         return 0
+
+
+class TrainingPlayer(Player):
+    """A player used to train the Deep Q Learning network."""
+
+    def get_action(self, state: State, valid_actions: list[Action]) -> Action:
+        pass
     
-    def lose_card(self, state: State) -> int:
-        lose_idx = self.choose_card(state)
-        card = self.cards[lose_idx]
-        del self.cards[lose_idx]
-        self.discarded_cards.append(card)
-        return card
-            
+    def get_challenge(self, state: State, action: Action) -> Challenge | None:
+        pass
+    
+    def get_counteraction(self, state: State, valid_actions: list[Action]) -> Action | None:
+        pass
 
-    def choose_cards(self, state: State) -> list[int]:
-        cards = []
-        for i in range(2):
-            lose_idx = self.choose_card(state)
-            cards.append(self.cards[lose_idx])
-            del self.cards[lose_idx]
-        return cards
+    def get_policy_action(self, state: torch.tensor) -> torch.tensor:
+        pass
+        
+    def choose_card(self, state: State) -> int:
+        pass
 
-    def show_card(self, card: int) -> None:
-        idx = self.cards.index(card)
-        del self.cards[idx]
+
+class SmartPlayer(Player):
+    """A player that follows the policy trained by Deep Q Learning."""
+
+    def get_action(self, state: State, valid_actions: list[Action]) -> Action:
+        pass
+    
+    def get_challenge(self, state: State, action: Action) -> Challenge | None:
+        pass
+    
+    def get_counteraction(self, state: State, valid_actions: list[Action]) -> Action | None:
+        pass
+        
+    def choose_card(self, state: State) -> int:
+        pass
 
 
 class UserPlayer(Player):
@@ -323,23 +301,3 @@ class UserPlayer(Player):
             print('USAGE: <card number>')
         
         return lose_idx
-
-    def lose_card(self, state: State) -> int:
-        lose_idx = self.choose_card(state)
-        card = self.cards[lose_idx]
-        del self.cards[lose_idx]
-        self.discarded_cards.append(card)
-        return card
-            
-
-    def choose_cards(self, state: State) -> list[int]:
-        cards = []
-        for i in range(2):
-            lose_idx = self.choose_card(state)
-            cards.append(self.cards[lose_idx])
-            del self.cards[lose_idx]
-        return cards
-
-    def show_card(self, card: int) -> None:
-        idx = self.cards.index(card)
-        del self.cards[idx]
