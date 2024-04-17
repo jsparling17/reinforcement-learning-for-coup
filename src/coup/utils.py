@@ -1,4 +1,5 @@
 from coup.representations import Action, Counter, Player
+import random
 
 # maps action number representation to name of action; i.e. ACTION_NAMES[i] gives the name of the action represented by i
 ACTION_NAMES: list[str] = ['Income', 'Foreign Aid', 'Tax', 'Exchange', 'Steal', 'Assassinate', 'Coup']
@@ -66,3 +67,47 @@ def generate_valid_counters(player_name, action):
         possible_blocks += [Counter(p1, True, True, counter_1)]
 
     return possible_blocks
+
+def action_bluffed(action_type: int, active_cards: list[int]) -> bool:
+    return not ACTION_IDX_CARD[action_type] in active_cards
+
+def counter_1_bluffed(action_type: int, counter_cards: list[int]) -> bool:
+    return not bool(set(ACTION_IDX_BLOCKER[action_type]).intersection(set(counter_cards)))
+
+def income(player_name: str, player_coins: dict[str, int]) -> None:
+        player_coins[player_name] += 1
+
+def foreign_aid(player_name: str, player_coins: dict[str, int]) -> None:
+    player_coins[player_name] += 2
+
+def tax(player_name: str, player_coins: dict[str, int]) -> None:
+    player_coins[player_name] += 3
+
+def steal(player1_name: str, player2_name: str, player_coins: dict[str, int]) -> None:
+    player_coins[player1_name] += min(player_coins[player2_name], 2)
+    player_coins[player2_name] -= min(player_coins[player2_name], 2)
+
+def coup(player1_name: str, player2_name: str, player_coins: dict[str, int], player_cards: dict[str, list[int]], card_idx: int, player_discards: dict[str, list[int]]) -> None:
+    player_coins[player1_name] -= 7
+    if len(player_cards[player2_name]) < 2: card_idx = 0
+    lost_card = player_cards[player2_name].pop(card_idx)
+    player_discards[player2_name].append(lost_card)
+
+def assassinate(player1_name: str, player2_name: str, player_coins: dict[str, int], player_cards: dict[str, list[int]], card_idx: int, player_discards: dict[str, list[int]]) -> None:
+    player_coins[player1_name] -= 3
+    if len(player_cards[player2_name]) < 2: card_idx = 0
+    lost_card = player_cards[player2_name].pop(card_idx)
+    player_discards[player2_name].append(lost_card)
+
+def lose_challenge(player_name: str, player_cards: dict[str, list[int]], card_idx: int, player_discards: dict[str, list[int]]) -> None:
+    if len(player_cards[player_name]) < 2: card_idx = 0
+    lost_card = player_cards[player_name].pop(card_idx)
+    player_discards[player_name].append(lost_card)
+
+def exchange(player_name: str, player_cards: dict[str, list[int]], cards: list[int], cards_idxs: list[int], deck: list[int]) -> None:
+    discards = [cards[idx] for idx in cards_idxs]
+    for idx in cards_idxs:
+        cards[idx] = None
+    player_cards[player_name] = [c for c in cards if c != None]
+    deck += discards
+    random.shuffle(deck)

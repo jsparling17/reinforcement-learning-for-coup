@@ -33,7 +33,9 @@ class Coup(gym.env):
         self.action_space = spaces.Box(low=0, high=1, shape=(action_dim,), dtype=np.float32)
         self.observation_space = spaces.Box(low=0, high=1, shape=(observation_dim,), dtype=np.float32)
 
-        self.player_count, self.round_cap, self.history_length = player_count, round_cap, history_length
+        self.player_count: int = player_count
+        self.round_cap: int = round_cap
+        self.history_length: int = history_length
 
     def step(self, action: np.NDArray) -> tuple[np.NDArray, np.float32, bool, bool, dict[str, Any]]:
         pass
@@ -56,16 +58,18 @@ class Coup(gym.env):
 
         if options == None:
             self.players: list[Player] = [HeuristicPlayer(f"Player {i + 1}") for i in range(self.player_count)]
-
-            self.agent_idx, self.reward_hyperparameters = random.choice(list(range(self.player_count))), [0.1, -0.05, 1, -0.5, 20]
+            self.agent_idx: int = random.choice(list(range(self.player_count)))
+            self.reward_hyperparameters: list[int] = [0.1, -0.05, 1, -0.5, 20]
         else:
-            self.players, self.agent_idx, self.reward_hyperparameters = options['players'], options['agent_idx'], options['reward_hyperparameters']
+            self.players: list[Player] = options['players']
+            self.agent_idx: int = options['agent_idx']
+            self.reward_hyperparameters: list[int] = options['reward_hyperparameters']
 
         self.game_state: State = State(self.players)
         self.history: list[Event] = []
-        self.phase = "action"
+        self.phase: str = "action"
 
-        self.round = 0
+        self.round: int = 0
 
 
     def render(self) -> None:
@@ -74,7 +78,7 @@ class Coup(gym.env):
     def close(self) -> None:
         pass
 
-    def _run_game_until_input(self):
+    def _run_game_until_input(self) -> None:
         """
         Runs the game until an input from the agent specified by self.agent_idx is required to continue. 
 
@@ -92,20 +96,26 @@ class Coup(gym.env):
         if (self.players[self.agent_idx] not in self.game_state.players) or (len(self.game_state.players) == 1):
             return
         
-        players, deck, player_cards, player_discards, player_coins, current_player = vars(self.game_state).values()
+        gs: State = self.game_state
         
         if self.phase == "action":
-            self.current_action, self.current_counter_1, self.current_counter_2, self.current_discard, self.current_discard_pair = None, None, None, [], None
-            self.current_discarders, self.current_counter_1_queried, self.current_counter_2_queried = [], [], []
+            self.current_action: Action = Action('', '', -2)
+            self.current_counter_1: Counter = Counter('', False, False, True)
+            self.current_counter_2: Counter = Counter('', False, True, False)
+            self.current_discard: list[tuple[Player, int]] = []
+            self.current_discard_pair: list[int] = []
+            self.current_discarders: list[Player] = []
+            self.current_counter_1_queried: list[Player] = []
+            self.current_counter_2_queried: list[Player] = []
 
-            if self._decision_is_agent(current_player): 
+            if self._decision_is_agent(gs.current_player): 
                 return 
             else:
-                self.current_action = current_player.get_action(self.game_state, self.history, generate_valid_actions(current_player, players, player_coins, player_cards))
+                self.current_action = gs.current_player.get_action(self.game_state, self.history, generate_valid_actions(gs.current_player, gs.players, gs.player_coins, gs.player_cards))
                 self._action_phase_transition()
             
         elif self.phase == "counter_1":
-            for player in [p for p in players if p.name != current_player.name]:
+            for player in [p for p in gs.players if p.name != gs.current_player.name]:
                 if player in self.current_counter_1_queried: continue
                 self.current_counter_1_queried.append(player)
                 if self._decision_is_agent(player):
@@ -113,13 +123,13 @@ class Coup(gym.env):
                 else:
                     potential_counter_1 = player.get_counter(self.current_action, self.game_state, self.history, generate_valid_counters(player, self.current_action))
                     if potential_counter_1.attempted:
-                        self.self.current_counter_1 = potential_counter_1
+                        self.current_counter_1 = potential_counter_1
                         break
             self._counter_1_phase_transition()
 
         elif self.phase == "counter_2":
 
-            for player in [p for p in players if p.name != self.current_counter_1.active_player]:
+            for player in [p for p in gs.players if p.name != self.current_counter_1.active_player]:
                 if player in self.current_counter_2_queried: continue
                 self.current_counter_2_queried.append(player)
                 if self._decision_is_agent(player):
@@ -128,7 +138,7 @@ class Coup(gym.env):
                     action = Action(self.current_counter_1.active_player, self.current_counter_1.active_player, -1)
                     potential_counter_2 = player.get_counter(action, self.game_state, self.history, generate_valid_counters(player, action), action_is_block=True)
                     if potential_counter_2.attempted:
-                        self.current_block2 = potential_counter_2
+                        self.current_counter_2 = potential_counter_2
                         break
             self._counter_2_phase_transition()
 
@@ -148,18 +158,18 @@ class Coup(gym.env):
 
         elif self.phase == "discard_pair":
 
-            player_cards[current_player.name] += [deck.pop(), deck.pop()]
-            if self._decision_is_agent(current_player):
+            gs.player_cards[gs.current_player.name] += [gs.deck.pop(), gs.deck.pop()]
+            if self._decision_is_agent(gs.current_player):
                 return
             else:
-                self.current_discard_pair = current_player.get_discard_pair(self.game_state, self.history)
+                self.current_discard_pair = gs.current_player.get_discard_pair(self.game_state, self.history)
                 self._discard_pair_phase_transition()
         else:
             exit(1)
 
         self._run_game_until_input()
 
-    def _run_phase_transition(self):
+    def _run_phase_transition(self) -> None:
         if self.phase == "action":
             self._action_phase_transition()
         elif self.phase == "counter_1":
@@ -173,7 +183,7 @@ class Coup(gym.env):
         else:
             exit(1)
 
-    def _action_phase_transition(self):
+    def _action_phase_transition(self) -> None:
         self.history.append(self.current_action)
         if self.current_action.type == 0:
             self.phase = "action"
@@ -183,7 +193,7 @@ class Coup(gym.env):
         else:
             self.phase = "counter_1"
 
-    def _counter_1_phase_transition(self):
+    def _counter_1_phase_transition(self) -> None:
         if len(self.current_counter_1_queried) < self.player_count - 1: 
             self.phase = "counter_1"
         self.history.append(self.current_counter_1)
@@ -201,7 +211,7 @@ class Coup(gym.env):
             else:
                 self.phase = "counter_2"
 
-    def _counter_2_phase_transition(self):
+    def _counter_2_phase_transition(self) -> None:
         if len(self.current_counter_2_queried) < self.player_count - 1: 
             self.phase = "counter_2"
         self.history.append(self.current_counter_2)
@@ -211,11 +221,10 @@ class Coup(gym.env):
         else:
             self.phase = "dispose"
 
-    def _discard_phase_transition(self):
+    def _discard_phase_transition(self) -> None:
         if self.current_action.type == 3:
-            player_cards = self.game_state.player_cards
-            active_cards = player_cards[self.current_action.active_player]
-            if ACTION_IDX_CARD[self.current_action.type] in active_cards:
+            active_cards = self.game_state.player_cards[self.current_action.active_player]
+            if not action_bluffed(self.current_action.type, active_cards):
                 self.phase = "keep"
             else:
                 self.phase = "action"
@@ -224,70 +233,122 @@ class Coup(gym.env):
             self.phase = "action"
             self._simulate_turn()
 
-    def _discard_pair_phase_transition(self):
+    def _discard_pair_phase_transition(self) -> None:
         self.history.append(DiscardPair(self.game_state.player_cards[self.game_state.current_player.name].copy(), self.current_discard))
         self.phase = "action"
         self._simulate_turn()
 
-    def _simulate_turn(self):
+    def _simulate_turn(self) -> None:
+        self.round += 1
+        gs: State = self.game_state
+        action_type: int = self.current_action.type
+
+        if self.current_counter_1.attempted:
+            if self.current_counter_2.attempted:
+                counter_cards = gs.player_cards[self.current_counter_1.active_player]
+                if not bool(set(ACTION_IDX_BLOCKER[type]).intersection(set(counter_cards))):
+                    card_idx = [disc[1] for disc in self.current_discard if disc[0].name == self.current_counter_1.active_player][0]
+                    lose_challenge(self.current_counter_1.active_player, gs.player_cards, card_idx, gs.player_discards)
+                    self._take_action()
+                else:
+                    card_idx = [disc[1] for disc in self.current_discard if disc[0].name == self.current_counter_2.active_player][0]
+                    lose_challenge(self.current_counter_2.active_player, gs.player_cards, card_idx, gs.player_discards)
+
+            else:
+                if self.current_counter_1.challenge:
+                    active_cards = gs.player_cards[self.current_action.active_player]
+                    if action_bluffed(action_type, active_cards):
+                        card_idx = [disc[1] for disc in self.current_discard if disc[0].name == self.current_action.active_player][0]
+                        lose_challenge(self.current_action.active_player, gs.player_cards, card_idx, gs.player_discards)
+                    else:
+                        card_idx = [disc[1] for disc in self.current_discard if disc[0].name == self.current_counter_1.active_player][0]
+                        lose_challenge(self.current_counter_1.active_player, gs.player_cards, card_idx, gs.player_discards)
+                        self._take_action()
+
+        else:
+            self._take_action()
+
+        self._update_next_player()
+
+    def _take_action(self) -> None:
+        gs: State = self.game_state
+        p1: str = self.current_action.active_player
+        p2: str = self.current_action.target_player
+        action_type: int = self.current_action.type
+
+        match action_type:
+            case 0:
+                income(p1, gs.player_coins)
+            case 1:
+                foreign_aid(p1, gs.player_coins)
+            case 2:
+                tax(p1, gs.player_coins)
+            case 3:
+                cards = gs.player_cards[gs.current_player.name].copy()
+                cards_idxs = self.current_discard
+                exchange(p1, gs.player_cards, cards, cards_idxs, gs.deck)
+            case 4:
+                steal(p1, p2, gs.player_coins)
+            case 5:
+                if len(gs.player_cards[p2]) > 0:
+                    card_idx = [disc[1] for disc in self.current_discard if disc[0].name == self.current_action.target_player][0]
+                    assassinate(p1, p2, gs.player_coins, gs.player_coins, card_idx, gs.player_discards)
+            case 6:
+                card_idx = [disc[1] for disc in self.current_discard if disc[0].name == self.current_action.target_player][0]
+                coup(p1, p2, gs.player_coins, gs.player_coins, card_idx, gs.player_discards)
+            case _:
+                return
+
+    def _update_next_player(self) -> None:
+        gs: State = self.game_state
+
+        gs.players = gs.players[1:] + [gs.players[0]]
+        gs.players = [p for p in gs.players if len(gs.player_cards[p.name]) > 0]
+        gs.player_coins = { p : (c if len(gs.player_cards[p]) > 0 else 0) for p, c in zip(gs.player_coins.keys(), gs.player_coins.values())}
+        gs.current_player = gs.players[0]
+
+    def _determine_discarders(self) -> list[Player]:
+        discarders: list[Player] = []
+        gs: State = self.game_state
+        action_type: int = self.current_action.type
+
+        if self.current_counter_1.attempted:
+            if self.current_counter_2.attempted:
+                counter_cards = gs.player_cards[self.current_counter_1.active_player]
+                if counter_1_bluffed(action_type, counter_cards):
+                    discarders.append([p for p in gs.players if p.name == self.current_counter_1.active_player][0])
+                    if action_type in [5, 6]:
+                        discarders.append([p for p in gs.players if p.name == self.current_action.target_player][0])
+                else:
+                    discarders.append([p for p in gs.players if p.name == self.current_counter_2.active_player][0])
+                
+            else:
+                if self.current_counter_2.challenge:
+                    active_cards = gs.player_cards[self.current_action.active_player]
+                    if action_bluffed(action_type, active_cards):
+                        discarders.append([p for p in gs.players if p.name == self.current_action.active_player][0])
+                    else:
+                        discarders.append([p for p in gs.players if p.name == self.current_counter_2.active_player][0])
+                        if action_type in [5, 6]:
+                            discarders.append([p for p in gs.players if p.name == self.current_action.target_player][0])
+
+        else:
+            if action_type in [5, 6]:
+                discarders.append([p for p in gs.players if p.name == self.current_action.target_player][0])
+        
+        return discarders
+
+
+    def _observation(self) -> np.NDArray[np.float32]:
+        return np.concatenate((self.game_state.encode(), self._encode_history()))
+
+    def _encode_history(self) -> np.NDArray[np.float32]:
         pass
 
-    def income(player_name, player_coins):
-        player_coins[player_name] += 1
-
-    def foreign_aid(player_name, player_coins):
-        player_coins[player_name] += 2
-
-    def tax(player_name, player_coins):
-        player_coins[player_name] += 3
-
-    def steal(player1_name, player2_name, player_coins):
-        player_coins[player1_name] += min(player_coins[player2_name], 2)
-        player_coins[player2_name] -= min(player_coins[player2_name], 2)
-
-    def coup(player1_name, player2_name, player_coins, player_cards, card_idx, player_discards):
-        player_coins[player1_name] -= 7
-        if len(player_cards[player2_name]) < 2: card_idx = 0
-        lost_card = player_cards[player2_name].pop(card_idx)
-        player_discards[player2_name].append(lost_card)
-
-    def assassinate(player1_name, player2_name, player_coins, player_cards, card_idx, player_discards):
-        player_coins[player1_name] -= 3
-        if len(player_cards[player2_name]) < 2: card_idx = 0
-        lost_card = player_cards[player2_name].pop(card_idx)
-        player_discards[player2_name].append(lost_card)
-
-    def lose_block(player_name, player_cards, card_idx, player_discards):
-        if len(player_cards[player_name]) < 2: card_idx = 0
-        lost_card = player_cards[player_name].pop(card_idx)
-        player_discards[player_name].append(lost_card)
-
-    def exchange(player_name, player_cards, cards, cards_idxs, deck):
-        player_cards[player_name] = [cards[idx] for idx in cards_idxs]
-        for idx in cards_idxs:
-            cards[idx] = None
-        cards = [c for c in cards if c != None]
-        deck += cards
-
-    def _take_action(self):
+    def _decode_action(self, a: np.NDArray[np.float32]) -> None:
         pass
 
-    def _update_next_player(self):
-        pass
-
-    def _determine_discarders(self):
-        pass
-
-    def _observation(self):
-        pass
-
-    def _encode_history(self):
-        pass
-
-    def _decode_action(self, a: np.NDArray[np.float32]):
-        pass
-
-    def _reward(self):
+    def _reward(self) -> np.float32:
         pass
     
     def _decision_is_agent(self, player: Player) -> bool:
