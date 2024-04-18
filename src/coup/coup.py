@@ -4,12 +4,12 @@ from gymnasium import spaces
 import random
 from typing import Any
 
-from coup.representations import State, Event, DiscardPair, Player
+from coup.representations import Action, Counter, State, Event, DiscardPair, Player
 from coup.player import HeuristicPlayer
 from coup.utils import *
 
 
-class Coup(gym.env):
+class Coup(gym.Env):
     """
     Simulates the game of Coup following the gym interface.  
     """
@@ -32,13 +32,28 @@ class Coup(gym.env):
 
         self.action_space = spaces.Box(low=0, high=1, shape=(action_dim,), dtype=np.float32)
         self.observation_space = spaces.Box(low=0, high=1, shape=(observation_dim,), dtype=np.float32)
-
         self.player_count: int = player_count
         self.round_cap: int = round_cap
         self.history_length: int = history_length
 
     def step(self, action: np.NDArray) -> tuple[np.NDArray, np.float32, bool, bool, dict[str, Any]]:
-        pass
+        gs: State = self.game_state
+
+        self._decode_action(action)
+
+        self._run_phase_transition()
+
+        terminated = (self.players[self.agent_idx] not in gs.players) or (len(gs.players) == 1)
+        if not terminated:
+            self._run_game_until_input()
+
+        observation = self._observation()
+        reward = self._reward()
+        terminated = (self.players[self.agent_idx] not in gs.players) or (len(gs.players) == 1)
+        truncated = self.round > self.round_cap
+        info = {}
+
+        return observation, reward, terminated, truncated, info
 
     def reset(self, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[np.NDArray[np.float32], dict[str, Any]]:
         """
@@ -234,7 +249,8 @@ class Coup(gym.env):
             self._simulate_turn()
 
     def _discard_pair_phase_transition(self) -> None:
-        self.history.append(DiscardPair(self.game_state.player_cards[self.game_state.current_player.name].copy(), self.current_discard))
+        gs: State = self.game_state
+        self.history.append(DiscardPair(self.players.index(gs.current_player), gs.player_cards[gs.current_player.name].copy(), self.current_discard))
         self.phase = "action"
         self._simulate_turn()
 
@@ -343,13 +359,159 @@ class Coup(gym.env):
         return np.concatenate((self.game_state.encode(), self._encode_history()))
 
     def _encode_history(self) -> np.NDArray[np.float32]:
-        pass
+        """
+        Return an np array of size (35 + 6 * player_count) * history_length that encodes the information from the last history_length turns.
+
+        history_length turns:
+            4 + 4 * player_count : action phase, 4 actions on oneself, 3 actions on other players, sender
+            3 + player_count  : counter_1 phase, 3 (accept, challenge, block) + player_count (blocker)
+            2 + player_count  : counter_2 phase, 2 (accept, challenge) + player_count (blocker)
+            26     : discard_pair phase  , 4 * 5 roles + (4 choose 2)
+
+        self.history is stored as the following:
+        [action: Action, counter_1: Counter, action: Action, counter_1: Counter, discard_pair: DiscardPair, ...]
+
+        action fields       : active, target , type 
+        counter fields      : active, attempted, challenge, counter_1
+        discard_pair fields : initial_cards , discard_idxs
+
+        Note: dispose is not a relevant action to store in the memory. 
+        Note: keeps are only stored for the agent
+        """
+
+        encoding: np.NDArray[np.float32] = np.zeros(((6 * self.player_count + 35) * self.history_length,))
+        encoded_turns: int = 0
+        event_encoding: np.NDArray[np.float32] = np.zeros((6 * self.player_count + 35,))
+        for event in reversed(self.history):
+            if encoded_turns == self.history_length:
+                return encoding
+            if isinstance(event, Action):
+                event_encoding[0:4 + 4 * self.player_count] = event.encode()
+                encoding[(6 * self.player_count + 35) * encoded_turns:(6 * self.player_count + 35) * (encoded_turns + 1)] = event_encoding
+                encoded_turns += 1
+                event_encoding = np.zeros((6 * self.n + 35,))
+            elif isinstance(event, Counter):
+                if event.counter_1:
+                    event_encoding[4 + 4 * self.player_count:7 + 5 * self.player_count] = event.encode()
+                else:
+                    event_encoding[7 + 5 * self.player_count:9 + 6 * self.player_count] = event.encode()
+            elif isinstance(event, DiscardPair) and event.active_player_idx == self.agent_idx:
+                event_encoding[9 + 6 * self.player_count:35 + 6 * self.player_count] = event.encode()
+        return encoding
 
     def _decode_action(self, a: np.NDArray[np.float32]) -> None:
-        pass
+        """
+        Return an action, counter, discard, or discard_pair based on the np array, a.
+        
+        action_size = 4 + 3 * (player_count - 1) # 4 actions on oneself, 3 actions on other players
+        counter_1_size = 3 # accept, challenge, block
+        counter_2_size = 2 # accept, challenge
+        discard_size = 2 # remove card 1 or card 2
+        discard_pair_size = 6 # (4 choose 2)
+        """
+
+        gs: State = self.game_state
+
+        player_names = list(gs.player_discards.keys())
+        if self.phase == "action":
+            a = a[0:1 + 3 * self.player_count]
+            possible_actions = generate_valid_actions(gs.current_player, gs.players, gs.player_coins, gs.player_cards)
+            list_of_players = list([p_name for p_name in gs.player_discards.keys() if p_name != player_names[self.agent_idx]])
+            idx_to_player = {i : list_of_players[i] for i in range(len(list_of_players))}
+            idx_to_type = {0: 'Income', 1: 'Foreign Aid', 2: 'Tax', 3: 'Exchange'}
+
+            for i in range(4, 3 + self.player_count):
+                idx_to_type[i] = 'Steal'
+            for i in range(3 + self.player_count, 2 + 2 * self.player_count):
+                idx_to_type[i] = 'Assassinate'
+            for i in range(2 + 2 * self.player_count, 1 + 3 * self.player_count):
+                idx_to_type[i] = 'Coup'
+
+            action = None
+            while action not in possible_actions:
+                i = np.argmax(a)
+                a[i] = -1 * float('inf')
+                type = ACTION_INDICES[idx_to_type[i]]
+                if i > 3:
+                    target = idx_to_player[(i - 4) % (self.player_count - 1)]
+                else:
+                    target = player_names[self.agent_idx]
+                action = Action(player_names[self.agent_idx], target, type)
+            self.current_action = action
+
+        elif self.phase == "counter_1":
+            a = a[1 + 3 * self.player_count:4 + 3 * self.player_count]
+            possible_counters = generate_valid_counters(player_names[self.agent_idx], self.current_action)
+
+            counter_1 = None
+            while counter_1 not in possible_counters:
+                i = np.argmax(a)
+                a[i] = -1 * float('inf')
+                if i == 0: # accept
+                    block1 = Counter(player_names[self.agent_idx], False, False, True)
+                if i == 1: # challenge
+                    block1 = Counter(player_names[self.agent_idx], True, True, True)
+                if i == 2: # block
+                    block1 = Counter(player_names[self.agent_idx], True, False, True)
+            self.current_counter_1 = counter_1
+
+        elif self.phase == "counter_2":
+            a = a[4 + 3 * self.player_count:6 + 3 * self.player_count]
+            counter_1 = self.current_counter_1
+            if counter_1.challenge:
+                counter_1 = Action(counter_1.active_player, player_names[self.agent_idx], -2)
+            else:
+                counter_1 = Action(counter_1.active_player, player_names[self.agent_idx], -1)
+            possible_counters = generate_valid_counters(player_names[self.agent_idx], counter_1)
+
+            counter_2 = None
+            while counter_2 not in possible_counters:
+                i = np.argmax(a)
+                a[i] = -1 * float('inf')
+                if i == 0: # accept
+                    counter_2 = Counter(player_names[self.agent_idx], False, False, True)
+                if i == 1: # challenge
+                    counter_2 = Counter(player_names[self.agent_idx], True, True, True)  
+            self.current_counter_2 = counter_2
+
+        elif self.phase == "discard":
+            a = a[6 + 3 * self.player_count:8 + 3 * self.player_count]
+            i = np.argmax(a)
+            if len(gs.player_discards[player_names[self.agent_idx]]) > 0:
+                i = 0
+            self.current_discard.append((self.players[self.agent_idx], i))
+
+        elif self.phase == "discard_pair":
+            a = a[8 + 3 * self.player_count:14 + 3 * self.player_count]
+            i = np.argmax(a)
+            idx_to_discard = {0: [0, 1],
+                            1: [0, 2],
+                            2: [0, 3],
+                            3: [1, 2],
+                            4: [1, 3],
+                            5: [2, 3]}
+            self.current_discard = idx_to_discard[i]
+
+        else:
+            exit(1)
 
     def _reward(self) -> np.float32:
-        pass
+        COIN_VALUE, OPP_COIN_VALUE, CARD_VALUE, OPP_CARD_VALUE, WIN_VALUE = self.reward_hyperparameters
+
+        gs: State = self.game_state
+
+        reward = 0
+
+        reward += COIN_VALUE * gs.player_coins[self.players[self.agent_idx].name]
+        reward += OPP_COIN_VALUE * sum([gs.player_coins[self.players[i].name] for i in range(self.player_count) if i != self.agent_idx])
+        reward += CARD_VALUE * len(gs.player_cards[self.players[self.agent_idx].name])
+        reward += OPP_CARD_VALUE * sum([len(gs.player_cards[self.players[i].name]) for i in range(self.player_count) if i != self.agent_idx])
+        if all(self.players[self.agent_idx].name == p for p in [p.name for p in gs.players]):
+            reward += WIN_VALUE
+        elif self.players[self.agent_idx].name not in [p.name for p in gs.players]:
+            reward += -1 * WIN_VALUE
+
+        return reward
     
     def _decision_is_agent(self, player: Player) -> bool:
         player_names = list(self.game_state.player_discards.keys())

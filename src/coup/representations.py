@@ -178,10 +178,12 @@ class DiscardPair(Event):
     """
     Represents the cards discarded to the Exchange action.\n
     Fields:\n
+    active_player\n
     initial_cards\n
     discard_idxs
     """
 
+    active_player_idx: int
     initial_cards: list[int]
     discard_idxs: list[int]
 

@@ -1,7 +1,7 @@
 import numpy as np
 import random
 import math
-from collections import deque
+from collections import namedtuple, deque
 from itertools import count
 
 import torch
@@ -9,12 +9,15 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
+Transition = namedtuple('Transition',
+                        ('state', 'action', 'next_state', 'reward'))
+
 class ReplayBuffer:
     def __init__(self, capacity: int):
         self.buffer = deque([], maxlen=capacity)
 
     def push(self, *args) -> None:
-        self.buffer.append(tuple(list(args)))
+        self.buffer.append(Transition(*args))
 
     def sample(self, batch_size: int) -> list[tuple]:
         return random.sample((self.buffer, batch_size))

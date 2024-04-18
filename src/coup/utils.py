@@ -19,7 +19,7 @@ ACTION_IDX_CARD: dict[int, int] = {2 : 4, 3 : 0, 4 : 2, 5 : 1}
 # maps action number representation to card that blocks it
 ACTION_IDX_BLOCKER: dict[int, list[int]] = {1 : [4], 4 : [0, 2], 5 : [3]}
 
-def generate_valid_actions(current_player: Player, players: list[Player], player_coins: dict[str, int], player_cards: dict[str, list[int]]):
+def generate_valid_actions(current_player: Player, players: list[Player], player_coins: dict[str, int], player_cards: dict[str, list[int]]) -> list[Action]:
     """
     Return all possible actions of the form (p1, p2, type) where
 
@@ -45,7 +45,7 @@ def generate_valid_actions(current_player: Player, players: list[Player], player
 
     return possible_actions
 
-def generate_valid_counters(player_name, action):
+def generate_valid_counters(player_name: str, action: Action) -> list[Counter]:
     """
     Return all possible counters of the form (p1, attempted, challenge, counter_1) where
 
@@ -56,7 +56,7 @@ def generate_valid_counters(player_name, action):
     """
     p1 = player_name
 
-    counter_1 = (action.type == -1)
+    counter_1 = (action.type >= 0)
 
     possible_blocks = [Counter(p1, False, False, counter_1)]
 
@@ -75,7 +75,7 @@ def counter_1_bluffed(action_type: int, counter_cards: list[int]) -> bool:
     return not bool(set(ACTION_IDX_BLOCKER[action_type]).intersection(set(counter_cards)))
 
 def income(player_name: str, player_coins: dict[str, int]) -> None:
-        player_coins[player_name] += 1
+    player_coins[player_name] += 1
 
 def foreign_aid(player_name: str, player_coins: dict[str, int]) -> None:
     player_coins[player_name] += 2
