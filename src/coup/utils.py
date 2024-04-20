@@ -39,7 +39,7 @@ def generate_valid_actions(current_player: Player, players: list[Player], player
     if player_coins[p1] >= 7:
         possible_actions += [Action(p1, p2, 6) for p2 in other_players]
     
-    possible_actions += [Action(p1, p1, 0), (p1, p1, 1), (p1, p1, 2), (p1, p1, 3)]
+    possible_actions += [Action(p1, p1, 0), Action(p1, p1, 1), Action(p1, p1, 2), Action(p1, p1, 3)]
 
     possible_actions += [Action(p1, p2.name, 4) for p2 in players if p2.name != p1 and player_coins[p2.name] > 0]
 
@@ -47,26 +47,25 @@ def generate_valid_actions(current_player: Player, players: list[Player], player
 
 def generate_valid_counters(player_name: str, action: Action) -> list[Counter]:
     """
-    Return all possible counters of the form (p1, attempted, challenge, counter_1) where
+    Return all possible counters of the form (player_name, attempted, challenge, counter_1) where
 
-    p1 = player
+    player_name = player
     attempted = boolean whether player chose to block
     challenge = True if player challenges, or False if player claims a role to block
     counter_1 = True if counter is against action, False if against other counter
     """
-    p1 = player_name
 
     counter_1 = (action.type >= 0)
 
-    possible_blocks = [Counter(p1, False, False, counter_1)]
+    possible_counters = [Counter(player_name, False, False, counter_1)]
 
     if action.type in [1, 4, 5]:
-        possible_blocks += [Counter(p1, True, False, True)]
+        possible_counters += [Counter(player_name, True, False, True)]
 
     if action.type in [2, 3, 4, 5, -1]:
-        possible_blocks += [Counter(p1, True, True, counter_1)]
+        possible_counters += [Counter(player_name, True, True, counter_1)]
 
-    return possible_blocks
+    return possible_counters
 
 def action_bluffed(action_type: int, active_cards: list[int]) -> bool:
     return not ACTION_IDX_CARD[action_type] in active_cards

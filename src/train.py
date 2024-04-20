@@ -6,6 +6,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 from collections import deque
 from itertools import count
+from argparse import ArgumentParser
 
 import torch
 import torch.nn as nn
@@ -14,6 +15,7 @@ import torch.nn.functional as F
 
 from agent import Transition, ReplayBuffer, DQN
 from coup.coup import Coup
+from coup.player import GreedyPlayer, HeuristicPlayer, RandomPlayer
 
 
 class Trainer:
@@ -29,12 +31,12 @@ class Trainer:
     # STATE_SIZE is the dimension of the input vector representing the state of the game
     # ACTION_COUNT is the dimension of the output vector representing actions
 
-    def __init__(self, env: gym.Env, BATCH_SIZE: int = 128,
+    def __init__(self, env: Coup, BATCH_SIZE: int = 128,
                  GAMMA: float = 0.99, EPS_START: float = 0.9, 
                  EPS_END: float = 0.05, EPS_DECAY: float = 1000,
                  TAU: float = 0.005, LR: float = 1e-4):
         
-        self.env: gym.Env = env
+        self.env: Coup = env
         self.state_size: int = env.observation_space.shape[0]
         self.action_count: int = env.action_space.shape[0]
         
@@ -58,22 +60,20 @@ class Trainer:
         self.steps_done: int = 0
 
         self.episode_durations = []
+        self.episode_rewards = []
 
         plt.ion()
 
     def get_policy_action(self, state: torch.tensor) -> torch.tensor:
         sample = random.random()
-        eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * \
-            math.exp(-1. * self.steps_done / self.eps_decay)
+        eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * math.exp(-1. * self.steps_done / self.eps_decay)
         self.steps_done += 1
         if sample > eps_threshold:
             with torch.no_grad():
-                # t.max(1) will return the largest column value of each row.
-                # second column on max result is index of where max element was
-                # found, so we pick action with the larger expected reward.
-                return self.policy_net(state).max(1).indices.view(1, 1)
+                action = self.policy_net(state)[0]
+                return action
         else:
-            return torch.tensor([[self.env.action_space.sample()]], device=self.device, dtype=torch.long)
+            return torch.tensor(self.env.action_space.sample(), device=self.device, dtype=torch.float32)
         
     def plot_durations(self, show_result: bool = False) -> None:
         plt.figure(1)
@@ -89,6 +89,25 @@ class Trainer:
         # Take 100 episode averages and plot them too
         if len(durations_t) >= 100:
             means = durations_t.unfold(0, 100, 1).mean(1).view(-1)
+            means = torch.cat((torch.zeros(99), means))
+            plt.plot(means.numpy())
+
+        plt.pause(0.001)  # pause a bit so that plots are updated
+
+    def plot_rewards(self, show_result: bool = False) -> None:
+        plt.figure(1)
+        rewards_t = torch.tensor(self.episode_rewards, dtype=torch.float)
+        if show_result:
+            plt.title('Result')
+        else:
+            plt.clf()
+            plt.title('Training...')
+        plt.xlabel('Episode')
+        plt.ylabel('Reward')
+        plt.plot(rewards_t.numpy())
+        # Take 100 episode averages and plot them too
+        if len(rewards_t) >= 100:
+            means = rewards_t.unfold(0, 100, 1).mean(1).view(-1)
             means = torch.cat((torch.zeros(99), means))
             plt.plot(means.numpy())
 
@@ -110,6 +129,7 @@ class Trainer:
                                                     if s is not None])
         state_batch = torch.cat(batch.state)
         action_batch = torch.cat(batch.action)
+        action_batch = action_batch.argmax(dim=1).view(state_batch.shape[0], 1)
         reward_batch = torch.cat(batch.reward)
 
         # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
@@ -130,7 +150,7 @@ class Trainer:
 
         # Compute Huber loss
         criterion = nn.SmoothL1Loss()
-        loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
+        loss = criterion(state_action_values.squeeze(1), expected_state_action_values)
 
         # Optimize the model
         self.optimizer.zero_grad()
@@ -147,12 +167,17 @@ class Trainer:
                 num_episodes = 50
 
         for i in range(num_episodes):
+            if i % 50 == 0: print(i)
+
+            options = None
+            options = {'players' : [RandomPlayer(f"Player {i+1}") for i in range(self.env.player_count)], 'agent_idx' : random.choice(list(range(self.env.player_count))), 'reward_hyperparameters' : [0.1, -0.05, 1, -0.5, 20]}
+            # options = {'players' : [GreedyPlayer(f"Player {i+1}") for i in range(self.env.player_count - 1)] + [HeuristicPlayer(f"Player {self.env.player_count}")], 'agent_idx' : 0, 'reward_hyperparameters' : [0.1, -0.05, 1, -0.5, 20]}
             # Initialize the environment and get its state
-            state, _ = self.env.reset()
+            state, _ = self.env.reset(options=options)
             state = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
             for t in count():
                 action = self.get_policy_action(state)
-                observation, reward, terminated, truncated, _ = self.env.step(action.item())
+                observation, reward, terminated, truncated, info = self.env.step(action)
                 reward = torch.tensor([reward], device=self.device)
                 done = terminated or truncated
 
@@ -160,9 +185,11 @@ class Trainer:
                     next_state = None
                 else:
                     next_state = torch.tensor(observation, dtype=torch.float32, device=self.device).unsqueeze(0)
-
+                
+                action = torch.zeros_like(action, dtype=torch.int64)
+                action[info['action']] = 1
                 # Store the transition in memory
-                self.memory.push(state, action, next_state, reward)
+                self.memory.push(state, action.unsqueeze(0), next_state, reward)
 
                 # Move to the next state
                 state = next_state
@@ -174,30 +201,38 @@ class Trainer:
                 target_net_state_dict = self.target_net.state_dict()
                 policy_net_state_dict = self.policy_net.state_dict()
                 for key in policy_net_state_dict:
-                    target_net_state_dict[key] = policy_net_state_dict[key] * self.tau + target_net_state_dict[key] * (1-self.tau)
+                    target_net_state_dict[key] = policy_net_state_dict[key] * self.tau + target_net_state_dict[key] * (1 - self.tau)
                 self.target_net.load_state_dict(target_net_state_dict)
 
                 if done:
                     self.episode_durations.append(t + 1)
-                    self.plot_durations()
+                    self.episode_rewards.append(reward.item())
+                    self.plot_rewards()
+                    # self.plot_durations()
                     break
 
         print('Complete')
-        self.plot_durations(show_result=True)
+        # self.plot_durations(show_result=True)
+        self.plot_rewards(show_result=True)
         plt.ioff()
         plt.show()
 
-        self.save_model()
+        self.save_model(f"model_{self.env.player_count}_players_{num_episodes}_episodes.pt")
 
     def save_model(self, path: str):
         torch.save(self.policy_net.state_dict(), path)
 
 def main():
-    env = Coup(2)
+    parser = ArgumentParser(description='Train a Deep Q-learning agent for Coup.')
+    parser.add_argument('--player_count', '-n', type=int, default=2, help='the number of players')
+    parser.add_argument('--num_episodes', '-e', type=int, default=-1, help='the number of episodes for training')
 
-    trainer = Trainer(env)
+    args = parser.parse_args()
+    env = Coup(args.player_count)
 
-    trainer.train()
+    trainer = Trainer(env, EPS_DECAY=args.num_episodes)
+
+    trainer.train(args.num_episodes)
 
 if __name__ == '__main__':
     main()

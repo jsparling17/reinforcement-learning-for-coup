@@ -34,7 +34,7 @@ class State:
 
         self.current_player = players[0]
     
-    def encode(self, idx: int, player_count: int) -> np.NDArray[np.float32]:
+    def encode(self, idx: int, player_count: int) -> np.ndarray[np.float32]:
         _, _, player_cards, player_discards, player_coins, _ = vars(self).values()
         player_names = list(player_discards.keys())
         name = player_names[idx]
@@ -68,7 +68,6 @@ class State:
 
         return encoding
 
-@dataclass
 class Event(ABC):
     """
     Interface for game events (actions, counters, pair discards).
@@ -78,10 +77,11 @@ class Event(ABC):
         return vars(self) == vars(other)
 
     @abstractmethod
-    def encode(self, state: State, player_count: int) -> np.NDArray[np.float32]:
+    def encode(self, state: State, player_count: int) -> np.ndarray[np.float32]:
         pass
 
 
+@dataclass
 class Action(Event):
     """
     Represents an action.\n
@@ -95,7 +95,7 @@ class Action(Event):
     target_player: str
     type: int
 
-    def encode(self, state: State, player_count: int) -> np.NDArray[np.float32]:
+    def encode(self, state: State, player_count: int) -> np.ndarray[np.float32]:
         encoding = np.zeros((4 * player_count + 4,))
         active, target, action_type = vars(self).values()
         player_names = list(state.player_discards.keys())
@@ -104,26 +104,27 @@ class Action(Event):
         encoding[player_names.index(active)] = 1
 
         # encode the action_type along with target
-        if action_type == 'Income':
+        if action_type == 0:
             encoding[player_count] = 1
-        elif action_type == 'Foreign Aid':
+        elif action_type == 1:
             encoding[player_count + 1] = 1
-        elif action_type == 'Tax':
+        elif action_type == 2:
             encoding[player_count + 2] = 1
-        elif action_type == 'Exchange':
+        elif action_type == 3:
             encoding[player_count + 3] = 1
-        elif action_type == 'Steal':
+        elif action_type == 4:
             encoding[player_count + 4 + player_names.index(target)] = 1
-        elif action_type == 'Assassinate':
+        elif action_type == 5:
             encoding[2 * player_count + 4 + player_names.index(target)] = 1 
-        elif action_type == 'Coup':
+        elif action_type == 6:
             encoding[3 * player_count + 4 + player_names.index(target)] = 1
         else:
             exit(1)
 
         return encoding
-    
 
+
+@dataclass
 class Counter(Event):
     """
     Represents a challenge or a block.\n
@@ -139,7 +140,7 @@ class Counter(Event):
     challenge: bool  # true if the counter is a challenge, false if it's a block
     counter_1: bool  # true if the counter is a 1st order counter, false if counter-counter
 
-    def encode(self, state: State, player_count: int) -> np.NDArray[np.float32]:
+    def encode(self, state: State, player_count: int) -> np.ndarray[np.float32]:
         active, attempted, challenge, counter_1 = vars(self).values()
 
         if counter_1:
@@ -174,6 +175,7 @@ class Counter(Event):
         return encoding
     
 
+@dataclass
 class DiscardPair(Event):
     """
     Represents the cards discarded to the Exchange action.\n
@@ -187,9 +189,9 @@ class DiscardPair(Event):
     initial_cards: list[int]
     discard_idxs: list[int]
 
-    def encode(self) -> np.NDArray[np.float32]:
+    def encode(self, state: State, player_count: int) -> np.ndarray[np.float32]:
         encoding = np.zeros((26,))
-        initial_cards, discard_idxs = vars(self).values()
+        _, initial_cards, discard_idxs = vars(self).values()
 
         for i, card in enumerate(initial_cards):
             encoding[5 * i + card] = 1

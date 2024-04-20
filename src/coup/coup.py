@@ -3,6 +3,7 @@ import numpy as np
 from gymnasium import spaces
 import random
 from typing import Any
+import torch
 
 from coup.representations import Action, Counter, State, Event, DiscardPair, Player
 from coup.player import HeuristicPlayer
@@ -36,10 +37,10 @@ class Coup(gym.Env):
         self.round_cap: int = round_cap
         self.history_length: int = history_length
 
-    def step(self, action: np.NDArray) -> tuple[np.NDArray, np.float32, bool, bool, dict[str, Any]]:
+    def step(self, action: np.ndarray[np.float32]) -> tuple[np.ndarray[np.float32], np.float32, bool, bool, dict[str, Any]]:
         gs: State = self.game_state
 
-        self._decode_action(action)
+        action_idx: int = self._decode_action(action)
 
         self._run_phase_transition()
 
@@ -51,11 +52,11 @@ class Coup(gym.Env):
         reward = self._reward()
         terminated = (self.players[self.agent_idx] not in gs.players) or (len(gs.players) == 1)
         truncated = self.round > self.round_cap
-        info = {}
+        info = {'action' : action_idx}
 
         return observation, reward, terminated, truncated, info
 
-    def reset(self, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[np.NDArray[np.float32], dict[str, Any]]:
+    def reset(self, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[np.ndarray[np.float32], dict[str, Any]]:
         """
         options:
         - 'players': specifices the agents to use as opponents
@@ -86,6 +87,13 @@ class Coup(gym.Env):
 
         self.round: int = 0
 
+        self._run_game_until_input()
+
+        observation = self._observation()
+        info = {}
+
+        return observation, info
+
 
     def render(self) -> None:
         pass
@@ -102,8 +110,8 @@ class Coup(gym.Env):
         self.phase is one of the following: "action", "counter_1", "counter_2", "discard", or "discard_pair"
 
         action: get action_action from current player
-        counter_1: get action_block1 from all players besides current player (stop if dispute or block)
-        counter_2: get action_block2 from all players besides block1er (stop if dispute)
+        counter_1: get action_counter_1 from all players besides current player (stop if dispute or block)
+        counter_2: get action_counter_2 from all players besides counter_1er (stop if dispute)
         discard: get action_dispose from player who lost a card
         discard_pair: get action_keep from player who exchanged successfully
         """
@@ -116,7 +124,7 @@ class Coup(gym.Env):
         if self.phase == "action":
             self.current_action: Action = Action('', '', -2)
             self.current_counter_1: Counter = Counter('', False, False, True)
-            self.current_counter_2: Counter = Counter('', False, True, False)
+            self.current_counter_2: Counter = Counter('', False, False, False)
             self.current_discard: list[tuple[Player, int]] = []
             self.current_discard_pair: list[int] = []
             self.current_discarders: list[Player] = []
@@ -136,7 +144,7 @@ class Coup(gym.Env):
                 if self._decision_is_agent(player):
                     return 
                 else:
-                    potential_counter_1 = player.get_counter(self.current_action, self.game_state, self.history, generate_valid_counters(player, self.current_action))
+                    potential_counter_1 = player.get_counter(self.current_action, self.game_state, self.history, generate_valid_counters(player.name, self.current_action))
                     if potential_counter_1.attempted:
                         self.current_counter_1 = potential_counter_1
                         break
@@ -151,7 +159,7 @@ class Coup(gym.Env):
                     return
                 else:
                     action = Action(self.current_counter_1.active_player, self.current_counter_1.active_player, -1)
-                    potential_counter_2 = player.get_counter(action, self.game_state, self.history, generate_valid_counters(player, action), action_is_block=True)
+                    potential_counter_2 = player.get_counter(action, self.game_state, self.history, generate_valid_counters(player.name, action), action_is_block=True)
                     if potential_counter_2.attempted:
                         self.current_counter_2 = potential_counter_2
                         break
@@ -211,7 +219,8 @@ class Coup(gym.Env):
     def _counter_1_phase_transition(self) -> None:
         if len(self.current_counter_1_queried) < self.player_count - 1: 
             self.phase = "counter_1"
-        self.history.append(self.current_counter_1)
+        if self.current_counter_1.active_player != '':
+            self.history.append(self.current_counter_1)
         if not self.current_counter_1.attempted:
             if self.current_action.type == 5:
                 self.phase = "discard"
@@ -229,18 +238,19 @@ class Coup(gym.Env):
     def _counter_2_phase_transition(self) -> None:
         if len(self.current_counter_2_queried) < self.player_count - 1: 
             self.phase = "counter_2"
-        self.history.append(self.current_counter_2)
+        if self.current_counter_1.active_player != '':
+            self.history.append(self.current_counter_2)
         if not self.current_counter_2.attempted:
             self.phase = "action"
             self._simulate_turn()
         else:
-            self.phase = "dispose"
+            self.phase = "discard"
 
     def _discard_phase_transition(self) -> None:
         if self.current_action.type == 3:
             active_cards = self.game_state.player_cards[self.current_action.active_player]
             if not action_bluffed(self.current_action.type, active_cards):
-                self.phase = "keep"
+                self.phase = "discard_pair"
             else:
                 self.phase = "action"
                 self._simulate_turn()
@@ -250,7 +260,7 @@ class Coup(gym.Env):
 
     def _discard_pair_phase_transition(self) -> None:
         gs: State = self.game_state
-        self.history.append(DiscardPair(self.players.index(gs.current_player), gs.player_cards[gs.current_player.name].copy(), self.current_discard))
+        self.history.append(DiscardPair(self.players.index(gs.current_player), gs.player_cards[gs.current_player.name].copy(), self.current_discard_pair))
         self.phase = "action"
         self._simulate_turn()
 
@@ -262,7 +272,7 @@ class Coup(gym.Env):
         if self.current_counter_1.attempted:
             if self.current_counter_2.attempted:
                 counter_cards = gs.player_cards[self.current_counter_1.active_player]
-                if not bool(set(ACTION_IDX_BLOCKER[type]).intersection(set(counter_cards))):
+                if not bool(set(ACTION_IDX_BLOCKER[action_type]).intersection(set(counter_cards))):
                     card_idx = [disc[1] for disc in self.current_discard if disc[0].name == self.current_counter_1.active_player][0]
                     lose_challenge(self.current_counter_1.active_player, gs.player_cards, card_idx, gs.player_discards)
                     self._take_action()
@@ -301,17 +311,17 @@ class Coup(gym.Env):
                 tax(p1, gs.player_coins)
             case 3:
                 cards = gs.player_cards[gs.current_player.name].copy()
-                cards_idxs = self.current_discard
+                cards_idxs = self.current_discard_pair
                 exchange(p1, gs.player_cards, cards, cards_idxs, gs.deck)
             case 4:
                 steal(p1, p2, gs.player_coins)
             case 5:
                 if len(gs.player_cards[p2]) > 0:
                     card_idx = [disc[1] for disc in self.current_discard if disc[0].name == self.current_action.target_player][0]
-                    assassinate(p1, p2, gs.player_coins, gs.player_coins, card_idx, gs.player_discards)
+                    assassinate(p1, p2, gs.player_coins, gs.player_cards, card_idx, gs.player_discards)
             case 6:
                 card_idx = [disc[1] for disc in self.current_discard if disc[0].name == self.current_action.target_player][0]
-                coup(p1, p2, gs.player_coins, gs.player_coins, card_idx, gs.player_discards)
+                coup(p1, p2, gs.player_coins, gs.player_cards, card_idx, gs.player_discards)
             case _:
                 return
 
@@ -339,12 +349,12 @@ class Coup(gym.Env):
                     discarders.append([p for p in gs.players if p.name == self.current_counter_2.active_player][0])
                 
             else:
-                if self.current_counter_2.challenge:
+                if self.current_counter_1.challenge:
                     active_cards = gs.player_cards[self.current_action.active_player]
                     if action_bluffed(action_type, active_cards):
                         discarders.append([p for p in gs.players if p.name == self.current_action.active_player][0])
                     else:
-                        discarders.append([p for p in gs.players if p.name == self.current_counter_2.active_player][0])
+                        discarders.append([p for p in gs.players if p.name == self.current_counter_1.active_player][0])
                         if action_type in [5, 6]:
                             discarders.append([p for p in gs.players if p.name == self.current_action.target_player][0])
 
@@ -355,10 +365,10 @@ class Coup(gym.Env):
         return discarders
 
 
-    def _observation(self) -> np.NDArray[np.float32]:
-        return np.concatenate((self.game_state.encode(), self._encode_history()))
+    def _observation(self) -> np.ndarray[np.float32]:
+        return np.concatenate((self.game_state.encode(self.agent_idx, self.player_count), self._encode_history()))
 
-    def _encode_history(self) -> np.NDArray[np.float32]:
+    def _encode_history(self) -> np.ndarray[np.float32]:
         """
         Return an np array of size (35 + 6 * player_count) * history_length that encodes the information from the last history_length turns.
 
@@ -379,29 +389,31 @@ class Coup(gym.Env):
         Note: keeps are only stored for the agent
         """
 
-        encoding: np.NDArray[np.float32] = np.zeros(((6 * self.player_count + 35) * self.history_length,))
+        gs: State = self.game_state
+
+        encoding: np.ndarray[np.float32] = np.zeros(((6 * self.player_count + 35) * self.history_length,))
         encoded_turns: int = 0
-        event_encoding: np.NDArray[np.float32] = np.zeros((6 * self.player_count + 35,))
+        event_encoding: np.ndarray[np.float32] = np.zeros((6 * self.player_count + 35,))
         for event in reversed(self.history):
             if encoded_turns == self.history_length:
                 return encoding
             if isinstance(event, Action):
-                event_encoding[0:4 + 4 * self.player_count] = event.encode()
+                event_encoding[0:4 + 4 * self.player_count] = event.encode(gs, self.player_count)
                 encoding[(6 * self.player_count + 35) * encoded_turns:(6 * self.player_count + 35) * (encoded_turns + 1)] = event_encoding
                 encoded_turns += 1
-                event_encoding = np.zeros((6 * self.n + 35,))
+                event_encoding = np.zeros((6 * self.player_count + 35,))
             elif isinstance(event, Counter):
                 if event.counter_1:
-                    event_encoding[4 + 4 * self.player_count:7 + 5 * self.player_count] = event.encode()
+                    event_encoding[4 + 4 * self.player_count:7 + 5 * self.player_count] = event.encode(gs, self.player_count)
                 else:
-                    event_encoding[7 + 5 * self.player_count:9 + 6 * self.player_count] = event.encode()
+                    event_encoding[7 + 5 * self.player_count:9 + 6 * self.player_count] = event.encode(gs, self.player_count)
             elif isinstance(event, DiscardPair) and event.active_player_idx == self.agent_idx:
-                event_encoding[9 + 6 * self.player_count:35 + 6 * self.player_count] = event.encode()
+                event_encoding[9 + 6 * self.player_count:35 + 6 * self.player_count] = event.encode(gs, self.player_count)
         return encoding
 
-    def _decode_action(self, a: np.NDArray[np.float32]) -> None:
+    def _decode_action(self, a: torch.tensor) -> int:
         """
-        Return an action, counter, discard, or discard_pair based on the np array, a.
+        Identify an action, counter, discard, or discard_pair based on the np array, a. Returns the index of the selected action.
         
         action_size = 4 + 3 * (player_count - 1) # 4 actions on oneself, 3 actions on other players
         counter_1_size = 3 # accept, challenge, block
@@ -411,6 +423,9 @@ class Coup(gym.Env):
         """
 
         gs: State = self.game_state
+        idx: int = 0
+
+        a = a.cpu()
 
         player_names = list(gs.player_discards.keys())
         if self.phase == "action":
@@ -429,7 +444,7 @@ class Coup(gym.Env):
 
             action = None
             while action not in possible_actions:
-                i = np.argmax(a)
+                i = torch.argmax(a).item()
                 a[i] = -1 * float('inf')
                 type = ACTION_INDICES[idx_to_type[i]]
                 if i > 3:
@@ -440,22 +455,24 @@ class Coup(gym.Env):
             self.current_action = action
 
         elif self.phase == "counter_1":
+            idx += 1 + 3 * self.player_count
             a = a[1 + 3 * self.player_count:4 + 3 * self.player_count]
             possible_counters = generate_valid_counters(player_names[self.agent_idx], self.current_action)
 
             counter_1 = None
             while counter_1 not in possible_counters:
-                i = np.argmax(a)
+                i = torch.argmax(a).item()
                 a[i] = -1 * float('inf')
                 if i == 0: # accept
-                    block1 = Counter(player_names[self.agent_idx], False, False, True)
+                    counter_1 = Counter(player_names[self.agent_idx], False, False, True)
                 if i == 1: # challenge
-                    block1 = Counter(player_names[self.agent_idx], True, True, True)
+                    counter_1 = Counter(player_names[self.agent_idx], True, True, True)
                 if i == 2: # block
-                    block1 = Counter(player_names[self.agent_idx], True, False, True)
+                    counter_1 = Counter(player_names[self.agent_idx], True, False, True)
             self.current_counter_1 = counter_1
 
         elif self.phase == "counter_2":
+            idx += 4 + 3 * self.player_count
             a = a[4 + 3 * self.player_count:6 + 3 * self.player_count]
             counter_1 = self.current_counter_1
             if counter_1.challenge:
@@ -466,34 +483,49 @@ class Coup(gym.Env):
 
             counter_2 = None
             while counter_2 not in possible_counters:
-                i = np.argmax(a)
+                i = torch.argmax(a).item()
                 a[i] = -1 * float('inf')
                 if i == 0: # accept
-                    counter_2 = Counter(player_names[self.agent_idx], False, False, True)
+                    counter_2 = Counter(player_names[self.agent_idx], False, False, False)
                 if i == 1: # challenge
-                    counter_2 = Counter(player_names[self.agent_idx], True, True, True)  
+                    counter_2 = Counter(player_names[self.agent_idx], True, True, False)  
             self.current_counter_2 = counter_2
 
         elif self.phase == "discard":
+            idx += 6 + 3 * self.player_count
             a = a[6 + 3 * self.player_count:8 + 3 * self.player_count]
-            i = np.argmax(a)
+            i = torch.argmax(a).item()
             if len(gs.player_discards[player_names[self.agent_idx]]) > 0:
                 i = 0
             self.current_discard.append((self.players[self.agent_idx], i))
 
         elif self.phase == "discard_pair":
+            idx += 8 + 3 * self.player_count
             a = a[8 + 3 * self.player_count:14 + 3 * self.player_count]
-            i = np.argmax(a)
+
+            possible_pairs = [[0, 1], [0, 2], [1, 2]]
+            if len(gs.player_cards[self.current_action.active_player]) == 2:
+                possible_pairs += [[0, 3], [1, 3], [2, 3]]
+            
             idx_to_discard = {0: [0, 1],
                             1: [0, 2],
                             2: [0, 3],
                             3: [1, 2],
                             4: [1, 3],
                             5: [2, 3]}
-            self.current_discard = idx_to_discard[i]
+            
+            discard_pair = None
+            while discard_pair not in possible_pairs:
+                i = torch.argmax(a).item()
+                a[i] = -1 * float('inf')
+                discard_pair = idx_to_discard[i]
+            
+            self.current_discard_pair = discard_pair
 
         else:
             exit(1)
+
+        return idx + i
 
     def _reward(self) -> np.float32:
         COIN_VALUE, OPP_COIN_VALUE, CARD_VALUE, OPP_CARD_VALUE, WIN_VALUE = self.reward_hyperparameters
