@@ -17,6 +17,8 @@ from agent import Transition, ReplayBuffer, DQN
 from coup.coup import Coup
 from coup.player import GreedyPlayer, HeuristicPlayer, RandomPlayer
 
+from eval import Evaluator
+
 
 class Trainer:
     """A class used to train the Deep Q Learning network for coup."""
@@ -28,8 +30,6 @@ class Trainer:
     # EPS_DECAY controls the rate of exponential decay of epsilon, higher means a slower decay
     # TAU is the update rate of the target network
     # LR is the learning rate of the AdamW optimizer
-    # STATE_SIZE is the dimension of the input vector representing the state of the game
-    # ACTION_COUNT is the dimension of the output vector representing actions
 
     def __init__(self, env: Coup, BATCH_SIZE: int = 128,
                  GAMMA: float = 0.99, EPS_START: float = 0.9, 
@@ -61,10 +61,11 @@ class Trainer:
 
         self.episode_durations = []
         self.episode_rewards = []
+        self.win_rates = []
 
         plt.ion()
 
-    def get_policy_action(self, state: torch.tensor) -> torch.tensor:
+    def get_policy_action(self, state: torch.Tensor) -> torch.Tensor:
         sample = random.random()
         eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * math.exp(-1. * self.steps_done / self.eps_decay)
         self.steps_done += 1
@@ -145,6 +146,7 @@ class Trainer:
         next_state_values = torch.zeros(self.batch_size, device=self.device)
         with torch.no_grad():
             next_state_values[non_final_mask] = self.target_net(non_final_next_states).max(1).values
+
         # Compute the expected Q values
         expected_state_action_values = (next_state_values * self.gamma) + reward_batch
 
@@ -156,22 +158,32 @@ class Trainer:
         self.optimizer.zero_grad()
         loss.backward()
         # In-place gradient clipping
-        torch.nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
+        nn.utils.clip_grad_value_(self.policy_net.parameters(), 100)
         self.optimizer.step()
 
-    def train(self, num_episodes: int = -1):
+    def train(self, num_episodes: int = -1, player_type: str = "g"):
         if num_episodes < 0:
             if torch.backends.mps.is_available():
                 num_episodes = 1000
             else:
                 num_episodes = 50
 
-        for i in range(num_episodes):
-            if i % 50 == 0: print(i)
+        eval_freq = int(num_episodes / 25)
 
-            options = None
-            options = {'players' : [RandomPlayer(f"Player {i+1}") for i in range(self.env.player_count)], 'agent_idx' : random.choice(list(range(self.env.player_count))), 'reward_hyperparameters' : [0.1, -0.05, 1, -0.5, 20]}
-            # options = {'players' : [GreedyPlayer(f"Player {i+1}") for i in range(self.env.player_count - 1)] + [HeuristicPlayer(f"Player {self.env.player_count}")], 'agent_idx' : 0, 'reward_hyperparameters' : [0.1, -0.05, 1, -0.5, 20]}
+        for i in range(num_episodes):
+
+            match player_type:
+                case "g":
+                    players = [GreedyPlayer(f"Player {i+1}") for i in range(self.env.player_count)]
+                case "r":
+                    players = [RandomPlayer(f"Player {i+1}") for i in range(self.env.player_count)]
+                case "h":
+                    players = [HeuristicPlayer(f"Player {i+1}") for i in range(self.env.player_count)]
+                case _:
+                    players = [GreedyPlayer(f"Player {i+1}") for i in range(self.env.player_count)]
+
+            options = {'players' : players, 'agent_idx' : random.choice(list(range(self.env.player_count))), 'reward_hyperparameters' : [0.1, -0.05, 1, -0.5, 20]}
+
             # Initialize the environment and get its state
             state, _ = self.env.reset(options=options)
             state = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
@@ -207,17 +219,31 @@ class Trainer:
                 if done:
                     self.episode_durations.append(t + 1)
                     self.episode_rewards.append(reward.item())
-                    self.plot_rewards()
+                    # self.plot_rewards()
                     # self.plot_durations()
                     break
+            
+            if i % eval_freq == 0:
+                print(i)
+                evaluator = Evaluator(self.env, self.policy_net)
+
+                self.win_rates.append(evaluator.eval(num_episodes=200, player_type=player_type, display=False))
 
         print('Complete')
         # self.plot_durations(show_result=True)
-        self.plot_rewards(show_result=True)
+        # self.plot_rewards(show_result=True)
+
+        plt.plot([x * eval_freq + 1 for x in list(range(len(self.win_rates)))], self.win_rates, label="agent win rate")
+        plt.plot([x * eval_freq + 1 for x in list(range(len(self.win_rates)))], [1 / len(self.env.players) for _ in range(len(self.win_rates))], label="expected win rate", linestyle='dashed')
+        plt.legend()
+        plt.title('Q-Learning win rate over time')
+        plt.ylabel('win rate')
+        plt.xlabel('number of episodes')
+
         plt.ioff()
         plt.show()
 
-        self.save_model(f"model_{self.env.player_count}_players_{num_episodes}_episodes.pt")
+        self.save_model(f"models/model_{self.env.player_count}_{player_type}_players_{num_episodes}_episodes.pt")
 
     def save_model(self, path: str):
         torch.save(self.policy_net.state_dict(), path)
@@ -225,6 +251,7 @@ class Trainer:
 def main():
     parser = ArgumentParser(description='Train a Deep Q-learning agent for Coup.')
     parser.add_argument('--player_count', '-n', type=int, default=2, help='the number of players')
+    parser.add_argument('--player_type', '-p', type=str, default="g", help='the type of players to train against: r(andom), g(reedy), h(euristic)')
     parser.add_argument('--num_episodes', '-e', type=int, default=-1, help='the number of episodes for training')
 
     args = parser.parse_args()
@@ -232,7 +259,7 @@ def main():
 
     trainer = Trainer(env, EPS_DECAY=args.num_episodes)
 
-    trainer.train(args.num_episodes)
+    trainer.train(args.num_episodes, args.player_type)
 
 if __name__ == '__main__':
     main()

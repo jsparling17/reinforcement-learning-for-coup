@@ -293,20 +293,3 @@ class RandomPlayer(Player):
     def get_discard_pair(self, state: State, history: list[Event]) -> list[int]:
         cards = state.player_cards[self.name]
         return random.choice(list(combinations(range(len(cards)), 2)))
-
-class DummyPlayer(Player):
-    """
-    A stand-in player.
-    """
-
-    def get_action(self, state: State, history: list[Event], valid_actions: list[Action]) -> Action:
-        return valid_actions[0]
-
-    def get_counter(self, action: Action, state: State, history: list[Event], valid_counters: list[Counter], action_is_block: bool = False) -> Counter:
-        return valid_counters[0]
-
-    def get_discard(self, state: State, history: list[Event]) -> int:
-        return 0
-
-    def get_discard_pair(self, state: State, history: list[Event]) -> list[int]:
-        return [0, 1]
