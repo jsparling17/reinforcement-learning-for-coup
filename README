@@ -1,0 +1,5 @@
+Author: Jonah Sparling
+
+To train agents to play coup, use the train.py script. Run python train.py -h for syntax.
+
+To evaluate agents, use the eval.py script. Run python eval.py -h for syntax.
